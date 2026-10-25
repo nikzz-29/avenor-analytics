@@ -11,11 +11,15 @@ from app.modules.imports import parse_file, validate_rows
 from app.modules.schemas import Filter, QueryIn
 from tests.conftest import signup, workspace
 
-CSV = b'order_id,order_date,customer_id,product_name,quantity,unit_price,discount,refund,status,category,channel\nA,2025-06-01,C1,Lamp,2,50,10,0,paid,Home,Web\nA,2025-06-01,C1,Desk,1,100,0,0,paid,Home,Web\nB,2025-06-02,C2,Bag,1,80,0,20,refunded,Accessories,Retail\nC,2025-06-03,C1,Tee,1,30,0,0,cancelled,Apparel,Web\n'
+CSV = b"order_id,order_date,customer_id,product_name,quantity,unit_price,discount,refund,status,category,channel\nA,2025-06-01,C1,Lamp,2,50,10,0,paid,Home,Web\nA,2025-06-01,C1,Desk,1,100,0,0,paid,Home,Web\nB,2025-06-02,C2,Bag,1,80,0,20,refunded,Accessories,Retail\nC,2025-06-03,C1,Tee,1,30,0,0,cancelled,Apparel,Web\n"
 
 
-async def upload(client: httpx.AsyncClient, base: str, content: bytes = CSV, **data: str) -> httpx.Response:
-    return await client.post(base + "/datasets/import", files={"file": ("sales.csv", content, "text/csv")}, data=data)
+async def upload(
+    client: httpx.AsyncClient, base: str, content: bytes = CSV, **data: str
+) -> httpx.Response:
+    return await client.post(
+        base + "/datasets/import", files={"file": ("sales.csv", content, "text/csv")}, data=data
+    )
 
 
 async def test_auth_csrf_sessions(client: httpx.AsyncClient) -> None:
@@ -26,9 +30,23 @@ async def test_auth_csrf_sessions(client: httpx.AsyncClient) -> None:
     client.headers["x-csrf-token"] = client.cookies["avenor_csrf"]
     assert (await client.post("/api/v1/auth/logout")).status_code == 200
     assert (await client.get("/api/v1/auth/me")).status_code == 401
-    assert (await client.post("/api/v1/auth/login", json={"email": "alex@example.com", "password": "wrong"})).status_code == 401
-    assert (await client.post("/api/v1/auth/login", json={"email": "alex@example.com", "password": "correct-horse-29"})).status_code == 200
-    assert (await client.post("/api/v1/auth/login", headers={"origin": "https://evil.test"}, json={"email": "alex@example.com", "password": "correct-horse-29"})).status_code == 403
+    assert (
+        await client.post(
+            "/api/v1/auth/login", json={"email": "alex@example.com", "password": "wrong"}
+        )
+    ).status_code == 401
+    assert (
+        await client.post(
+            "/api/v1/auth/login", json={"email": "alex@example.com", "password": "correct-horse-29"}
+        )
+    ).status_code == 200
+    assert (
+        await client.post(
+            "/api/v1/auth/login",
+            headers={"origin": "https://evil.test"},
+            json={"email": "alex@example.com", "password": "correct-horse-29"},
+        )
+    ).status_code == 403
 
 
 async def test_money_import_query_export(client: httpx.AsyncClient) -> None:
@@ -36,7 +54,9 @@ async def test_money_import_query_export(client: httpx.AsyncClient) -> None:
     response = await upload(client, base)
     assert response.status_code == 200, response.text
     assert response.json()["imported"] == 4
-    overview = await client.get(base + "/analytics/overview", params={"start": "2025-06-01", "end": "2025-06-30"})
+    overview = await client.get(
+        base + "/analytics/overview", params={"start": "2025-06-01", "end": "2025-06-30"}
+    )
     assert overview.status_code == 200, overview.text
     current = overview.json()["current"]
     assert Decimal(current["revenue"]) == 250
@@ -44,7 +64,14 @@ async def test_money_import_query_export(client: httpx.AsyncClient) -> None:
     assert Decimal(current["aov"]) == 125
     assert current["customers"] == 2
     assert current["refunds"] == "20.00"
-    result = await client.post(base + "/analytics/query", json={"dimension": "category", "metric": "revenue", "filters": [{"field": "channel", "op": "eq", "values": ["Web"]}]})
+    result = await client.post(
+        base + "/analytics/query",
+        json={
+            "dimension": "category",
+            "metric": "revenue",
+            "filters": [{"field": "channel", "op": "eq", "values": ["Web"]}],
+        },
+    )
     assert sum(Decimal(p["value"]) for p in result.json()["points"]) == 190
     exported = await client.post(base + "/analytics/export", json={"dimension": "category"})
     assert "Home,190.00" in exported.text
@@ -54,7 +81,9 @@ async def test_money_import_query_export(client: httpx.AsyncClient) -> None:
     empty = (await client.get(base + "/analytics/overview?start=2020-01-01&end=2020-01-02")).json()
     assert empty["current"]["aov"] is None
     assert empty["revenue_growth"] is None
-    assert (await client.get(base + "/analytics/overview?start=2025-02-01&end=2025-01-01")).status_code == 422
+    assert (
+        await client.get(base + "/analytics/overview?start=2025-02-01&end=2025-01-01")
+    ).status_code == 422
 
 
 async def test_atomic_validation_and_replace(client: httpx.AsyncClient) -> None:
@@ -66,7 +95,9 @@ async def test_atomic_validation_and_replace(client: httpx.AsyncClient) -> None:
     assert (await client.get(base + "/datasets")).json() == []
     await upload(client, base)
     dataset = (await client.get(base + "/datasets")).json()[0]
-    replaced = await upload(client, base, CSV.replace(b"2,50", b"2,60"), mode="replace", dataset_id=dataset["id"])
+    replaced = await upload(
+        client, base, CSV.replace(b"2,50", b"2,60"), mode="replace", dataset_id=dataset["id"]
+    )
     assert replaced.json()["imported"] == 4
     total = (await client.post(base + "/analytics/query", json={})).json()
     assert sum(Decimal(p["value"]) for p in total["points"]) == 270
@@ -83,12 +114,25 @@ async def test_mapping_and_xlsx(client: httpx.AsyncClient) -> None:
     sheet.append(["X", "2025-01-01", "Alex", "Lamp", 2, 50])
     buffer = io.BytesIO()
     workbook.save(buffer)
-    response = await client.post(base + "/datasets/preview", files={"file": ("input.xlsx", buffer.getvalue())})
+    response = await client.post(
+        base + "/datasets/preview", files={"file": ("input.xlsx", buffer.getvalue())}
+    )
     assert response.status_code == 200, response.text
     assert response.json()["inferred_types"]["Price"] == "number"
     import json
-    mapping = dict(zip(["order_id", "order_date", "customer_id", "product_name", "quantity", "unit_price"], ["Order", "Date", "Customer", "Product", "Qty", "Price"], strict=True))
-    response = await client.post(base + "/datasets/import", files={"file": ("input.xlsx", buffer.getvalue())}, data={"mapping": json.dumps(mapping)})
+
+    mapping = dict(
+        zip(
+            ["order_id", "order_date", "customer_id", "product_name", "quantity", "unit_price"],
+            ["Order", "Date", "Customer", "Product", "Qty", "Price"],
+            strict=True,
+        )
+    )
+    response = await client.post(
+        base + "/datasets/import",
+        files={"file": ("input.xlsx", buffer.getvalue())},
+        data={"mapping": json.dumps(mapping)},
+    )
     assert response.json()["imported"] == 1
 
 
@@ -96,12 +140,20 @@ async def test_saved_resources_concurrency_and_isolation(client: httpx.AsyncClie
     base = await workspace(client)
     await upload(client, base)
     widget = {"id": "w1", "title": "Revenue", "type": "bar", "query": {"dimension": "category"}}
-    dashboard = (await client.post(base + "/dashboards", json={"name": "Board", "widgets": [widget]})).json()
+    dashboard = (
+        await client.post(base + "/dashboards", json={"name": "Board", "widgets": [widget]})
+    ).json()
     assert dashboard["widgets"][0]["title"] == "Revenue"
     data = {"name": "Renamed", "widgets": [widget], "revision": dashboard["revision"]}
-    assert (await client.patch(base + "/dashboards/" + dashboard["id"], json=data)).status_code == 200
-    assert (await client.patch(base + "/dashboards/" + dashboard["id"], json=data)).status_code == 409
-    report = await client.post(base + "/reports", json={"name": "Category", "query": {"dimension": "category"}})
+    assert (
+        await client.patch(base + "/dashboards/" + dashboard["id"], json=data)
+    ).status_code == 200
+    assert (
+        await client.patch(base + "/dashboards/" + dashboard["id"], json=data)
+    ).status_code == 409
+    report = await client.post(
+        base + "/reports", json={"name": "Category", "query": {"dimension": "category"}}
+    )
     assert report.status_code == 201
     # A different user cannot access any known IDs.
     client.cookies.clear()
@@ -120,14 +172,18 @@ async def test_viewer_permissions(client: httpx.AsyncClient) -> None:
     client.cookies.clear()
     client.cookies.update(owner_cookies)
     client.headers["x-csrf-token"] = client.cookies["avenor_csrf"]
-    assert (await client.put(base + "/members", json={"email": "viewer@example.com", "role": "viewer"})).status_code == 200
+    assert (
+        await client.put(base + "/members", json={"email": "viewer@example.com", "role": "viewer"})
+    ).status_code == 200
     client.cookies.clear()
     client.cookies.update(viewer_cookies)
     client.headers["x-csrf-token"] = client.cookies["avenor_csrf"]
     assert (await client.get(base + "/datasets")).status_code == 200
     assert (await client.post(base + "/analytics/query", json={})).status_code == 200
     assert (await client.post(base + "/dashboards", json={"name": "No"})).status_code == 403
-    assert (await client.put(base + "/members", json={"email": "viewer@example.com", "role": "admin"})).status_code == 403
+    assert (
+        await client.put(base + "/members", json={"email": "viewer@example.com", "role": "admin"})
+    ).status_code == 403
 
 
 async def test_demo_is_deterministic_and_resettable(client: httpx.AsyncClient) -> None:
@@ -135,7 +191,7 @@ async def test_demo_is_deterministic_and_resettable(client: httpx.AsyncClient) -
     assert response.status_code == 200, response.text
     client.headers["x-csrf-token"] = client.cookies["avenor_csrf"]
     ws = (await client.get("/api/v1/workspaces")).json()[0]
-    base = f'/api/v1/workspaces/{ws["id"]}'
+    base = f"/api/v1/workspaces/{ws['id']}"
     before = (await client.get(base + "/analytics/overview")).json()
     assert before["current"]["orders"] > 2000
     assert len(before["trend"]) == 12
@@ -162,3 +218,86 @@ def test_file_and_schema_guards() -> None:
     valid, errors, rejected = validate_rows(rows + [rows[0]], {c: c for c in cols})
     assert len(valid) == 4 and rejected == 1
     assert "Duplicate" in errors[0].message
+
+
+async def test_totals_are_not_sum_of_averages(client: httpx.AsyncClient) -> None:
+    base = await workspace(client)
+    await upload(client, base)
+    result = await client.post(
+        base + "/analytics/query", json={"metric": "aov", "dimension": "category"}
+    )
+    assert Decimal(result.json()["total"]) == 125
+    result = await client.post(
+        base + "/analytics/sales/export",
+        json={"filters": [{"field": "status", "op": "eq", "values": ["paid"]}]},
+    )
+    assert "net_revenue" in result.text
+    assert "cancelled" not in result.text
+    assert result.text.count("\n") == 3
+
+
+async def test_bad_numeric_filter_returns_validation_error(client: httpx.AsyncClient) -> None:
+    base = await workspace(client)
+    for value in ("hello", "NaN", "Infinity"):
+        result = await client.post(
+            base + "/analytics/query",
+            json={"filters": [{"field": "quantity", "op": "gt", "values": [value]}]},
+        )
+        assert result.status_code == 422
+
+
+async def test_oversized_chunked_body_is_bounded(client: httpx.AsyncClient) -> None:
+    async def chunks():
+        for _ in range(12):
+            yield b" " * 1024 * 1024
+
+    result = await client.post(
+        "/api/v1/auth/login", content=chunks(), headers={"content-type": "application/json"}
+    )
+    assert result.status_code == 413
+
+
+def test_order_consistency() -> None:
+    cols, rows = parse_file(CSV, "sales.csv")
+    rows[1]["customer_id"] = "someone-else"
+    valid, errors, rejected = validate_rows(rows, {c: c for c in cols})
+    assert rejected == 1 and len(valid) == 3
+    assert "must share" in errors[0].message
+
+
+async def test_password_reset_mail_is_one_time_and_revokes_sessions(
+    client: httpx.AsyncClient,
+) -> None:
+    import re
+    from uuid import uuid4
+
+    email = f"reset-{uuid4().hex[:8]}@example.com"
+    await signup(client, email)
+    csrf = client.cookies["avenor_csrf"]
+    requested = await client.post("/api/v1/auth/forgot-password", json={"email": email})
+    assert requested.status_code == 200
+    async with httpx.AsyncClient(base_url="http://localhost:8025") as mailbox:
+        messages = (await mailbox.get("/api/v1/messages")).json()["messages"]
+        message_id = next(m["ID"] for m in messages if any(t["Address"] == email for t in m["To"]))
+        body = (await mailbox.get("/api/v1/message/" + message_id)).json()["Text"]
+    token = re.search(r"token=([\w-]+)", body)
+    assert token is not None
+    payload = {"token": token.group(1), "password": "new-strong-password"}
+    assert (await client.post("/api/v1/auth/reset-password", json=payload)).status_code == 200
+    assert (await client.get("/api/v1/auth/me")).status_code == 401
+    assert (await client.post("/api/v1/auth/reset-password", json=payload)).status_code == 400
+    result = await client.post(
+        "/api/v1/auth/login", json={"email": email, "password": "new-strong-password"}
+    )
+    assert result.status_code == 200
+    assert client.cookies["avenor_csrf"] != csrf
+
+
+async def test_raw_export_matches_customer_search(client: httpx.AsyncClient) -> None:
+    base = await workspace(client)
+    await upload(client, base)
+    result = await client.post(
+        base + "/analytics/sales/export", json={"search": "C2", "status": "refunded"}
+    )
+    assert result.status_code == 200
+    assert "Bag" in result.text and "Lamp" not in result.text

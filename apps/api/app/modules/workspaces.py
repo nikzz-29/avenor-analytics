@@ -29,10 +29,18 @@ from app.modules.schemas import (
 router = APIRouter(tags=["Workspaces"])
 
 
-@router.post("/auth/demo", response_model=ProfileOut, dependencies=[Depends(rate_limit), Depends(check_origin)])
+@router.post(
+    "/auth/demo",
+    response_model=ProfileOut,
+    dependencies=[Depends(rate_limit), Depends(check_origin)],
+)
 async def demo(response: Response, db: DB) -> User:
-    user = User(email=f"demo-{secrets.token_hex(12)}@avenor.local", name="Alex Morgan", demo=True,
-                password_hash=hasher.hash(secrets.token_urlsafe(32)))
+    user = User(
+        email=f"demo-{secrets.token_hex(12)}@avenor.local",
+        name="Alex Morgan",
+        demo=True,
+        password_hash=hasher.hash(secrets.token_urlsafe(32)),
+    )
     db.add(user)
     await db.flush()
     ws = Workspace(name="Studio Commerce", demo=True)
@@ -46,7 +54,11 @@ async def demo(response: Response, db: DB) -> User:
 
 @router.get("/workspaces", response_model=list[WorkspaceOut])
 async def list_workspaces(user: CurrentUser, db: DB) -> list[WorkspaceOut]:
-    rows = (await db.execute(select(Workspace, Member.role).join(Member).where(Member.user_id == user.id))).all()
+    rows = (
+        await db.execute(
+            select(Workspace, Member.role).join(Member).where(Member.user_id == user.id)
+        )
+    ).all()
     return [WorkspaceOut.model_validate(w).model_copy(update={"role": role}) for w, role in rows]
 
 
@@ -77,7 +89,11 @@ async def update_workspace(data: WorkspacePatch, member: Membership, db: DB) -> 
 
 @router.get("/workspaces/{workspace_id}/members", response_model=list[MemberOut])
 async def members(member: Membership, db: DB) -> list[MemberOut]:
-    rows = (await db.execute(select(User, Member.role).join(Member).where(Member.workspace_id == member.workspace_id))).all()
+    rows = (
+        await db.execute(
+            select(User, Member.role).join(Member).where(Member.workspace_id == member.workspace_id)
+        )
+    ).all()
     return [MemberOut(user_id=u.id, name=u.name, email=u.email, role=role) for u, role in rows]
 
 
@@ -131,6 +147,7 @@ async def reset_demo(member: Membership, db: DB) -> Message:
     if not ws.demo:
         raise HTTPException(400, "Only isolated demo workspaces can be reset")
     from app.db.models import ImportJob, Report
+
     for model in (Dataset, Dashboard, ImportJob, Report, AuditLog):
         await db.execute(delete(model).where(model.workspace_id == ws.id))
     ws.default_dashboard_id = None
@@ -140,4 +157,11 @@ async def reset_demo(member: Membership, db: DB) -> Message:
 
 @router.get("/workspaces/{workspace_id}/activity", response_model=list[ActivityOut])
 async def activity(member: Membership, db: DB) -> list[AuditLog]:
-    return list(await db.scalars(select(AuditLog).where(AuditLog.workspace_id == member.workspace_id).order_by(AuditLog.created_at.desc()).limit(10)))
+    return list(
+        await db.scalars(
+            select(AuditLog)
+            .where(AuditLog.workspace_id == member.workspace_id)
+            .order_by(AuditLog.created_at.desc())
+            .limit(10)
+        )
+    )

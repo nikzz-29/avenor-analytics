@@ -1,5 +1,5 @@
 from datetime import date, datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from typing import Annotated, Literal
 
 from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
@@ -7,7 +7,19 @@ from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
 Name = Annotated[str, Field(min_length=1, max_length=100, pattern=r"\S")]
 Role = Literal["owner", "admin", "editor", "viewer"]
 Dimension = Literal["date", "category", "product_name", "customer_id", "channel", "status"]
-Metric = Literal["revenue", "orders", "aov", "units", "customers", "sum", "count", "distinct_count", "average", "minimum", "maximum"]
+Metric = Literal[
+    "revenue",
+    "orders",
+    "aov",
+    "units",
+    "customers",
+    "sum",
+    "count",
+    "distinct_count",
+    "average",
+    "minimum",
+    "maximum",
+]
 ChartType = Literal["line", "area", "bar", "horizontal", "stacked", "donut", "table", "kpi", "text"]
 
 
@@ -36,7 +48,9 @@ class ProfileOut(ORM):
 
 class ProfileIn(BaseModel):
     name: Name
-    preferences: dict[Literal["theme", "date_format", "number_format"], str] = Field(default_factory=dict, max_length=3)
+    preferences: dict[Literal["theme", "date_format", "number_format"], str] = Field(
+        default_factory=dict, max_length=3
+    )
 
 
 class PasswordIn(BaseModel):
@@ -88,7 +102,16 @@ class MemberOut(BaseModel):
 
 
 class Filter(BaseModel):
-    field: Literal["category", "product_name", "customer_id", "channel", "status", "quantity", "unit_price", "order_date"]
+    field: Literal[
+        "category",
+        "product_name",
+        "customer_id",
+        "channel",
+        "status",
+        "quantity",
+        "unit_price",
+        "order_date",
+    ]
     op: Literal["eq", "neq", "contains", "in", "gt", "lt", "between"]
     values: list[str] = Field(min_length=1, max_length=50)
 
@@ -106,8 +129,12 @@ class Filter(BaseModel):
         for value in self.values:
             if len(value) > 200:
                 raise ValueError("Filter value too long")
-            if numeric and not Decimal(value).is_finite():
-                raise ValueError("Finite number required")
+            if numeric:
+                try:
+                    if not Decimal(value).is_finite():
+                        raise ValueError("Finite number required")
+                except InvalidOperation as exc:
+                    raise ValueError("Valid number required") from exc
             if dated:
                 date.fromisoformat(value)
         return self
@@ -131,6 +158,12 @@ class QueryIn(BaseModel):
         return self
 
 
+class SalesExportIn(QueryIn):
+    search: str = Field(default="", max_length=100)
+    status: Literal["paid", "pending", "cancelled", "refunded"] | None = None
+    order_sort: Literal["-date", "date", "-revenue", "revenue"] = "-date"
+
+
 class Point(BaseModel):
     label: str
     value: Decimal
@@ -138,6 +171,7 @@ class Point(BaseModel):
 
 class QueryOut(BaseModel):
     points: list[Point]
+    total: Decimal | None
     metric: Metric
     currency: str = "USD"
 
@@ -216,6 +250,8 @@ class SaleOut(ORM):
     unit_price: Decimal
     discount: Decimal
     refund: Decimal
+
+    net_revenue: Decimal
 
 
 class SalesPage(BaseModel):

@@ -1153,6 +1153,56 @@
         }
       }
     },
+    "/api/v1/workspaces/{workspace_id}/analytics/sales/export": {
+      "post": {
+        "tags": [
+          "Analytics"
+        ],
+        "summary": "Export Sales",
+        "operationId": "export_sales_api_v1_workspaces__workspace_id__analytics_sales_export_post",
+        "parameters": [
+          {
+            "name": "workspace_id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SalesExportIn"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/workspaces/{workspace_id}/datasets/preview": {
       "post": {
         "tags": [
@@ -2934,6 +2984,17 @@
             "type": "array",
             "title": "Points"
           },
+          "total": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Total"
+          },
           "metric": {
             "type": "string",
             "enum": [
@@ -2960,6 +3021,7 @@
         "type": "object",
         "required": [
           "points",
+          "total",
           "metric"
         ],
         "title": "QueryOut"
@@ -3130,6 +3192,10 @@
           "refund": {
             "type": "string",
             "title": "Refund"
+          },
+          "net_revenue": {
+            "type": "string",
+            "title": "Net Revenue"
           }
         },
         "type": "object",
@@ -3145,9 +3211,151 @@
           "quantity",
           "unit_price",
           "discount",
-          "refund"
+          "refund",
+          "net_revenue"
         ],
         "title": "SaleOut"
+      },
+      "SalesExportIn": {
+        "properties": {
+          "dataset_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Dataset Id"
+          },
+          "metric": {
+            "type": "string",
+            "enum": [
+              "revenue",
+              "orders",
+              "aov",
+              "units",
+              "customers",
+              "sum",
+              "count",
+              "distinct_count",
+              "average",
+              "minimum",
+              "maximum"
+            ],
+            "title": "Metric",
+            "default": "revenue"
+          },
+          "dimension": {
+            "type": "string",
+            "enum": [
+              "date",
+              "category",
+              "product_name",
+              "customer_id",
+              "channel",
+              "status"
+            ],
+            "title": "Dimension",
+            "default": "date"
+          },
+          "start": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Start"
+          },
+          "end": {
+            "anyOf": [
+              {
+                "type": "string",
+                "format": "date"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "End"
+          },
+          "grouping": {
+            "type": "string",
+            "enum": [
+              "day",
+              "week",
+              "month"
+            ],
+            "title": "Grouping",
+            "default": "month"
+          },
+          "filters": {
+            "items": {
+              "$ref": "#/components/schemas/Filter"
+            },
+            "type": "array",
+            "maxItems": 10,
+            "title": "Filters"
+          },
+          "sort": {
+            "type": "string",
+            "enum": [
+              "label",
+              "value",
+              "-value"
+            ],
+            "title": "Sort",
+            "default": "label"
+          },
+          "limit": {
+            "type": "integer",
+            "maximum": 500.0,
+            "minimum": 1.0,
+            "title": "Limit",
+            "default": 100
+          },
+          "search": {
+            "type": "string",
+            "maxLength": 100,
+            "title": "Search",
+            "default": ""
+          },
+          "status": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "paid",
+                  "pending",
+                  "cancelled",
+                  "refunded"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Status"
+          },
+          "order_sort": {
+            "type": "string",
+            "enum": [
+              "-date",
+              "date",
+              "-revenue",
+              "revenue"
+            ],
+            "title": "Order Sort",
+            "default": "-date"
+          }
+        },
+        "type": "object",
+        "title": "SalesExportIn"
       },
       "SalesPage": {
         "properties": {

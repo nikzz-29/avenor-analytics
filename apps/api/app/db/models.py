@@ -2,7 +2,16 @@ from datetime import UTC, date, datetime
 from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Numeric, String, UniqueConstraint
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Numeric,
+    String,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db.session import Base
@@ -52,15 +61,24 @@ class Workspace(Base):
 
 class Member(Base):
     __tablename__ = "workspace_members"
-    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True)
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.id", ondelete="CASCADE"), primary_key=True
+    )
     role: Mapped[str] = mapped_column(default="owner")
+    __table_args__ = (
+        CheckConstraint("role IN ('owner','admin','editor','viewer')", name="ck_members_role"),
+    )
 
 
 class Dataset(Base):
     __tablename__ = "datasets"
     id: Mapped[str] = mapped_column(primary_key=True, default=uid)
-    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
     name: Mapped[str] = mapped_column(String(200))
     fingerprint: Mapped[str]
     row_count: Mapped[int]
@@ -71,6 +89,7 @@ class Dataset(Base):
 
 class Sale(Base):
     """One fact per order/product line. Financial values are line-level, never order totals."""
+
     __tablename__ = "sales"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
     workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"))
@@ -87,16 +106,33 @@ class Sale(Base):
     discount: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     refund: Mapped[Decimal] = mapped_column(Numeric(14, 2), default=0)
     __table_args__ = (
+        CheckConstraint("quantity > 0 AND quantity <= 100000", name="ck_sales_quantity"),
+        CheckConstraint(
+            "unit_price >= 0 AND discount >= 0 AND refund >= 0", name="ck_sales_nonnegative"
+        ),
+        CheckConstraint("discount + refund <= quantity * unit_price", name="ck_sales_net_amount"),
+        CheckConstraint(
+            "status IN ('paid','pending','cancelled','refunded')", name="ck_sales_status"
+        ),
+        CheckConstraint("refund = 0 OR status = 'refunded'", name="ck_sales_refund_status"),
         UniqueConstraint("dataset_id", "order_id", "product_name"),
         Index("ix_sales_workspace_date", "workspace_id", "order_date"),
         Index("ix_sales_workspace_customer", "workspace_id", "customer_id"),
     )
 
+    @property
+    def net_revenue(self) -> Decimal:
+        if self.status not in ("paid", "refunded"):
+            return Decimal(0)
+        return self.quantity * self.unit_price - self.discount - self.refund
+
 
 class ImportJob(Base):
     __tablename__ = "import_jobs"
     id: Mapped[str] = mapped_column(primary_key=True, default=uid)
-    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
     filename: Mapped[str]
     status: Mapped[str]
     imported: Mapped[int] = mapped_column(default=0)
@@ -108,7 +144,9 @@ class ImportJob(Base):
 class Dashboard(Base):
     __tablename__ = "dashboards"
     id: Mapped[str] = mapped_column(primary_key=True, default=uid)
-    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
     name: Mapped[str] = mapped_column(String(100))
     widgets: Mapped[list[dict[str, object]]] = mapped_column(JSON, default=list)
     revision: Mapped[int] = mapped_column(default=1)
@@ -118,7 +156,9 @@ class Dashboard(Base):
 class Report(Base):
     __tablename__ = "reports"
     id: Mapped[str] = mapped_column(primary_key=True, default=uid)
-    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
     name: Mapped[str] = mapped_column(String(100))
     query: Mapped[dict[str, object]] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
@@ -127,6 +167,8 @@ class Report(Base):
 class AuditLog(Base):
     __tablename__ = "audit_logs"
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    workspace_id: Mapped[str] = mapped_column(ForeignKey("workspaces.id", ondelete="CASCADE"), index=True)
+    workspace_id: Mapped[str] = mapped_column(
+        ForeignKey("workspaces.id", ondelete="CASCADE"), index=True
+    )
     action: Mapped[str]
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=now)
