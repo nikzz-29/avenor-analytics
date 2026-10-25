@@ -4,6 +4,7 @@ import io
 import json
 import re
 import zipfile
+import zlib
 from datetime import date, datetime
 from decimal import Decimal
 from pathlib import PurePath
@@ -102,6 +103,13 @@ def parse_file(content: bytes, filename: str) -> tuple[list[str], list[dict[str,
     elif suffix == ".xlsx":
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as archive:
+                if any(item.flag_bits & 1 for item in archive.infolist()):
+                    raise ValueError("Encrypted XLSX files are not supported")
+                if any(
+                    item.compress_type not in (zipfile.ZIP_STORED, zipfile.ZIP_DEFLATED)
+                    for item in archive.infolist()
+                ):
+                    raise ValueError("Unsupported XLSX compression")
                 if sum(item.file_size for item in archive.infolist()) > 100 * 1024 * 1024:
                     raise ValueError("Uncompressed spreadsheet is too large")
                 if len(archive.infolist()) > 1000:
@@ -111,8 +119,8 @@ def parse_file(content: bytes, filename: str) -> tuple[list[str], list[dict[str,
             )
             try:
                 sheet = workbook.active
-                if sheet is None:
-                    raise ValueError("Spreadsheet has no worksheet")
+                if sheet is None or sheet not in workbook.worksheets:
+                    raise ValueError("Choose a data worksheet as the active sheet, not a chart")
                 if sheet.max_row and sheet.max_row > MAX_ROWS + 1:
                     raise ValueError("Maximum 100,000 worksheet rows per import")
                 if sheet.max_column and sheet.max_column > 50:
@@ -132,7 +140,14 @@ def parse_file(content: bytes, filename: str) -> tuple[list[str], list[dict[str,
                         raw_rows.append((source_row, values))
             finally:
                 workbook.close()
-        except (zipfile.BadZipFile, KeyError, OSError, ParseError, DefusedXmlException) as exc:
+        except (
+            zipfile.BadZipFile,
+            zlib.error,
+            KeyError,
+            OSError,
+            ParseError,
+            DefusedXmlException,
+        ) as exc:
             raise ValueError("Invalid XLSX file") from exc
     else:
         raise ValueError("Only CSV and XLSX files are supported")

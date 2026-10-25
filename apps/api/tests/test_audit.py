@@ -361,3 +361,44 @@ async def test_workspace_patch_changes_only_explicit_fields(client: httpx.AsyncC
     assert selected.json()["name"] == "Latest name"
     assert selected.json()["default_dashboard_id"] == board["id"]
     assert (await client.patch(base, json={"name": None})).status_code == 422
+
+
+def test_active_excel_chartsheet_is_a_clear_validation_error() -> None:
+    import io
+
+    import openpyxl
+    from openpyxl.chart import BarChart, Reference
+
+    workbook = openpyxl.Workbook()
+    sheet = workbook.active
+    assert sheet is not None
+    sheet.append(["Order", "Date", "Customer", "Product", "Qty", "Price"])
+    sheet.append(["A", "2025-01-01", "C", "Lamp", 1, 10])
+    chart = BarChart()
+    chart.add_data(Reference(sheet, min_col=6, min_row=1, max_row=2), titles_from_data=True)
+    workbook.create_chartsheet("Chart").add_chart(chart)
+    workbook.active = 1
+    output = io.BytesIO()
+    workbook.save(output)
+    with pytest.raises(ValueError, match="worksheet"):
+        parse_file(output.getvalue(), "sales.xlsx")
+
+
+def test_password_protected_archive_is_rejected_cleanly() -> None:
+    import io
+    import zipfile
+
+    output = io.BytesIO()
+    with zipfile.ZipFile(output, "w") as archive:
+        archive.writestr(
+            "[Content_Types].xml",
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types"/>',
+        )
+    data = bytearray(output.getvalue())
+    for signature, offset in ((b"PK\x03\x04", 6), (b"PK\x01\x02", 8)):
+        position = data.index(signature) + offset
+        data[position : position + 2] = (
+            int.from_bytes(data[position : position + 2], "little") | 1
+        ).to_bytes(2, "little")
+    with pytest.raises(ValueError, match="XLSX"):
+        parse_file(bytes(data), "encrypted.xlsx")
