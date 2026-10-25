@@ -1,0 +1,21 @@
+{
+  "measured_at": "2026-10-25T16:22:26.081970+00:00",
+  "environment": "Python 3.12 / local PostgreSQL 17 Docker / single API process",
+  "measurements": [
+    {
+      "rows": 10000,
+      "bytes": 552856,
+      "import_seconds": 1.292,
+      "query_seconds": 0.028,
+      "revenue": "1000000.00"
+    },
+    {
+      "rows": 100000,
+      "bytes": 5627956,
+      "import_seconds": 11.747,
+      "query_seconds": 0.133,
+      "revenue": "10000000.00"
+    }
+  ],
+  "notes": "Single local run; synchronous atomic imports, 10 MiB / 100,000 row cap. Includes HTTP and validation; no throughput guarantee."
+}

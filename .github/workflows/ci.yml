@@ -1,0 +1,75 @@
+name: Validate Avenor
+on: [push, pull_request]
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_DB: avenor_test
+          POSTGRES_USER: avenor
+          POSTGRES_PASSWORD: avenor
+        ports: [5432:5432]
+        options: >-
+          --health-cmd "pg_isready -U avenor"
+          --health-interval 3s --health-timeout 3s --health-retries 20
+      mail:
+        image: axllent/mailpit:v1.27
+        ports: [1025:1025, 8025:8025]
+    env:
+      DATABASE_URL: postgresql+psycopg://avenor:avenor@localhost:5432/avenor_test
+      TEST_DATABASE_URL: postgresql+psycopg://avenor:avenor@localhost:5432/avenor_test
+      APP_ORIGIN: http://localhost:3000
+      NEXT_TELEMETRY_DISABLED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with: {version: '0.12.23', python-version: '3.12'}
+      - uses: actions/setup-node@v4
+        with: {node-version: '24', cache: npm, cache-dependency-path: apps/web/package-lock.json}
+      - run: uv sync --project apps/api --frozen
+      - run: npm ci --prefix apps/web
+      - name: Backend checks and real PostgreSQL tests
+        working-directory: apps/api
+        run: |
+          uv run alembic upgrade head
+          uv run ruff check .
+          uv run ruff format --check .
+          uv run mypy app
+          uv run pytest -q
+      - name: Contract drift
+        run: |
+          cd apps/api
+          uv run python ../../scripts/export-contracts.py
+          cd ../web
+          npm run contracts
+          cd ../..
+          git diff --exit-code packages/api-contracts apps/web/src/lib/api-schema.d.ts
+      - name: Web checks
+        working-directory: apps/web
+        run: |
+          npm run typecheck
+          npm run lint
+          npm test
+          npm run build
+      - name: Browser workflows
+        run: |
+          node scripts/prepare-browser.mjs
+          cd apps/api
+          uv run uvicorn app.main:app --host 0.0.0.0 --port 8000 > /tmp/avenor-api.log 2>&1 &
+          cd ../web
+          npm run start > /tmp/avenor-web.log 2>&1 &
+          for attempt in $(seq 1 40); do
+            if curl -fsS http://localhost:3000/ > /dev/null && curl -fsS http://localhost:8000/api/v1/health > /dev/null; then break; fi
+            sleep 1
+          done
+          npm run test:e2e
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: browser-evidence
+          path: |
+            apps/web/playwright-report
+            apps/web/test-results
+            docs/screenshots

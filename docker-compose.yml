@@ -23,6 +23,11 @@ services:
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       SMTP_HOST: mail
     ports: ["127.0.0.1:8000:8000"]
+    healthcheck:
+      test: ["CMD", "/app/.venv/bin/python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/health', timeout=3)"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
     depends_on:
       db: {condition: service_healthy}
       mail: {condition: service_started}
@@ -31,6 +36,12 @@ services:
     environment:
       API_URL: http://api:8000
     ports: ["127.0.0.1:3000:3000"]
-    depends_on: [api]
+    depends_on:
+      api: {condition: service_healthy}
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:3000').then(r=>{if(!r.ok)process.exit(1)}).catch(()=>process.exit(1))"]
+      interval: 5s
+      timeout: 4s
+      retries: 20
 volumes:
   postgres-data:
