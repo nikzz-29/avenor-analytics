@@ -26,11 +26,11 @@ Every protected resource requires a workspace membership. Owner/Admin manage mem
 - `reports`: saved validated query JSON.
 - `audit_logs`: actual workspace actions, not generated business events.
 
-Product/category/customer/channel dimensions live in the imported facts. They are not independent editable catalog entities, so separate unused dimension tables are deliberately omitted. Money uses NUMERIC(14,2), quantities are positive integers, roles/statuses have checks, and FK cascades delete dependent sales. Indexes cover tenancy/date/customer access. A composite unique key rejects duplicate dataset/order/product lines; workspace import locks prevent overlapping order IDs across sources during concurrent imports.
+Product/category/customer/channel dimensions live in the imported facts. They are not independent editable catalog entities, so separate unused dimension tables are deliberately omitted. Money uses NUMERIC(14,2), quantities are positive integers, roles/statuses have checks, and FK cascades delete dependent sales. Indexes cover tenancy/date/customer access. A composite unique key rejects duplicate dataset/order/product lines; exclusive workspace mutation locks prevent overlapping order IDs across sources during concurrent imports and serialize population/reset/deletion. Analytics acquires shared locks on the same row to prevent a response mixing old KPI totals with newly imported chart data.
 
 ## Layout persistence
 
-Widget order, half/full width, standard/tall height, title, type, notes and query are persisted together. The API updates a dashboard only if the submitted revision matches. A conflicting tab receives 409 and must reload. Saving is explicit, so rapid UI rearrangements coalesce into one atomic write. Dnd-kit provides mouse/keyboard sorting; arrows provide accessible mobile ordering. Width/height use preset grid choices, not arbitrary pixel resizing.
+Widget order, half/full width, standard/tall height, title, type, notes and query are persisted together. The API updates a dashboard only if the submitted revision matches. A conflicting tab receives 409 and must reload. Saving is explicit, so rapid UI rearrangements coalesce into one atomic write. Dnd-kit provides mouse/keyboard sorting; arrows provide accessible mobile ordering. Width/height use preset grid choices, not arbitrary pixel resizing. Rename uses a separate draft until Apply; mutations are disabled during a pending save. Discard confirmation covers workspace selection and in-app links; save before using browser Back/Forward, which are not intercepted by App Router.
 
 ## Cloud builds
 

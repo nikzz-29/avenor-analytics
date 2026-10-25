@@ -9,10 +9,10 @@
 - Registration, Argon2id passwords, persistent HttpOnly cookie sessions, CSRF protection, logout, profile/password changes, and one-time password recovery through local Mailpit.
 - Isolated workspaces with Owner, Admin, Editor and Viewer permissions enforced by the API.
 - One-click, independent demo workspaces: 2,548 deterministic order lines across January–December 2025, including seasonality, repeat customers, discounts, cancellations and refunds. Demo reset is explicit.
-- Overview, Sales, Customers and Products use the same PostgreSQL sales facts. Period comparisons, filters, server-side search/sort/pagination, column visibility, and entity detail views.
+- Overview, Sales, Customers and Products use the same PostgreSQL sales facts. Aligned period comparisons, a default date range based on the latest imported year, filters, server-side search/sort/pagination, column visibility, and entity detail views.
 - Data explorer with validated metrics, dimensions, typed filters, bounded SQL aggregation and ECharts visualizations with accessible data tables.
 - CSV/XLSX preview, column mapping, inferred types, row validation, atomic create/replace imports, duplicate prevention, private source handling, import history and error CSVs.
-- Dashboard creation, rename, duplication, deletion, default selection, widget editing, mouse/keyboard drag ordering, mobile order controls, two width/height choices, notes and persisted layout. Revision checks prevent silent concurrent overwrites.
+- Dashboard creation, rename, duplication, deletion, default selection, widget editing, mouse/keyboard drag ordering, mobile order controls, two width/height choices, notes and persisted layout. Revision checks prevent silent concurrent overwrites; in-app links/workspace changes warn before discarding an unsaved layout.
 - Saved report configurations, live results, editing/deletion and CSV export. Sales exports preserve the current search, status and period.
 - Light/dark/system themes, responsive navigation, local fonts, reduced motion, loading/empty/error states, and persistent account preferences.
 
@@ -119,7 +119,7 @@ npm run test:e2e
 
 The browser helper unpacks the locked `@sparticuz/chromium` development package, useful when the environment blocks Playwright's download CDN. It needs a compatible Linux x86-64 environment. On other platforms, use `npx playwright install chromium`; omit `.data/browser-path` or set `PW_CHROMIUM_PATH` to a compatible installed Chromium. The tests default to `http://localhost:3000`.
 
-Tests cover real browser registration, demo analytics, search/filtering, dashboard edit/resize/persistence, CSV mapping/import, saved reports/export, theme persistence, mobile navigation and overflow checks at 360/390/768/1024/1440/1920 px. Axe checks exercise light and dark Overview. Screenshots are real captures, not fixture data. See [validation evidence](docs/validation.md).
+Tests cover real browser registration, demo analytics, search/filtering, dashboard edit/resize/persistence, CSV mapping/import, saved reports/export, theme persistence, mobile navigation and overflow checks at 360/390/768/1024/1440/1920 px. Axe checks exercise light and dark Overview. Screenshots are real captures, not fixture data. See [validation evidence](docs/validation.md) and the [bug audit report](docs/bug-audit.md).
 
 ## API contracts
 
@@ -133,7 +133,7 @@ npm run contracts
 npm run typecheck
 ```
 
-Commit the schema and generated TypeScript together. GitHub Actions checks contract drift, backend/frontend checks, production build and browser workflows; the workflow itself is supplied but has not been run on GitHub.
+Commit the schema and generated TypeScript together. GitHub Actions checks contract drift, backend/frontend checks, production build and browser workflows; GitHub Actions results have not been verified from this environment.
 
 ## Measured performance
 
