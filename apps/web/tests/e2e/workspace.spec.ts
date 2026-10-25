@@ -1,4 +1,4 @@
-import { test, expect } from '@playwright/test';
+import { test, expect } from './fixtures';
 import AxeBuilder from '@axe-core/playwright';
 import { readFileSync, mkdirSync } from 'node:fs';
 
@@ -59,13 +59,11 @@ test('demo → analytics → dashboard persistence → import → report export'
   ).toBeVisible();
   await page.getByRole('link', { name: 'Data sources', exact: true }).click();
   await page.getByRole('button', { name: 'Import dataset', exact: true }).click();
-  await page
-    .getByLabel('Choose sales file')
-    .setInputFiles({
-      name: 'portfolio-sales.csv',
-      mimeType: 'text/csv',
-      buffer: readFileSync('public/sample-sales.csv'),
-    });
+  await page.getByLabel('Choose sales file').setInputFiles({
+    name: 'portfolio-sales.csv',
+    mimeType: 'text/csv',
+    buffer: readFileSync('public/sample-sales.csv'),
+  });
   await expect(page.getByLabel('Map order_id')).toHaveValue('order_id');
   await page.getByRole('button', { name: 'Validate data', exact: true }).click();
   await expect(page.getByRole('heading', { name: 'Everything checks out.' })).toBeVisible();
@@ -121,6 +119,10 @@ test('registration, workspace, demo data and persistent preferences', async ({ p
   await page.reload();
   await expect(page.getByLabel('Full name')).toHaveValue('Taylor Updated');
   await expect(page.getByLabel('Number format')).toHaveValue('de-DE');
+  await page.getByRole('button', { name: 'Dark', exact: true }).click();
+  await expect(page.locator('html')).toHaveClass(/dark/);
+  await page.reload();
+  await expect(page.locator('html')).toHaveClass(/dark/);
   await page.getByRole('button', { name: 'Sign out', exact: true }).click();
   await expect(page).toHaveURL('/');
   await page.goto('/workspace/overview');
@@ -157,8 +159,10 @@ test('responsive layouts, themes, accessible overview and screenshots', async ({
   await expect(page.locator('html')).toHaveClass(/dark/);
   await page.setViewportSize({ width: 1440, height: 1000 });
   await page.screenshot({ path: '../../docs/screenshots/overview-1440-dark.png', fullPage: true });
-  const darkA11y = await new AxeBuilder({page}).withTags(['wcag2a','wcag2aa','wcag21aa']).analyze();
-  expect(darkA11y.violations.map(v=>v.id)).toEqual([]);
+  const darkA11y = await new AxeBuilder({ page })
+    .withTags(['wcag2a', 'wcag2aa', 'wcag21aa'])
+    .analyze();
+  expect(darkA11y.violations.map((v) => v.id)).toEqual([]);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.getByRole('button', { name: 'Open navigation' }).click();
   await page.getByRole('link', { name: 'Dashboards', exact: true }).click();

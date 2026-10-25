@@ -111,4 +111,11 @@ it('resets pagination when the date range changes', () => {
   expect(result.current[0]).toBe(5);
   rerender({ key: 'quarter' });
   expect(result.current[0]).toBe(1);
+  rerender({ key: 'year' });
+  expect(result.current[0]).toBe(1);
+});
+
+it('shows precise financial detail when cents are requested', () => {
+  expect(money('20.50', 'en-US', 2)).toBe('$20.50');
+  expect(money('20.50', 'de-DE', 2)).toContain('20,50');
 });

@@ -51,6 +51,13 @@ export function QueryControls({
             onChange={(e) => update({ dataset_id: e.target.value || null })}
           >
             <option value="">All workspace sales</option>
+            {value.dataset_id &&
+              datasets.data &&
+              !datasets.data.some((d) => d.id === value.dataset_id) && (
+                <option value={value.dataset_id} disabled>
+                  Unavailable source · choose another
+                </option>
+              )}
             {datasets.data?.map((d) => (
               <option key={d.id} value={d.id}>
                 {d.name}
@@ -142,6 +149,7 @@ export function QueryControls({
           <div className="row-between">
             <span className="field-caption">FILTERS · ALL MUST MATCH</span>
             <Button
+              type="button"
               size="sm"
               variant="ghost"
               disabled={filters.length >= 10}
@@ -184,7 +192,17 @@ export function QueryControls({
                 value={f.op}
                 onChange={(e) => {
                   const next = [...filters];
-                  next[i] = { ...f, op: e.target.value as Schema['Filter']['op'] };
+                  const op = e.target.value as Schema['Filter']['op'];
+                  next[i] = {
+                    ...f,
+                    op,
+                    values: ['in', 'between'].includes(op)
+                      ? f.values
+                          .join(',')
+                          .split(',')
+                          .map((v) => v.trim())
+                      : [f.values.join(',')],
+                  };
                   update({ filters: next });
                 }}
               >
@@ -218,7 +236,12 @@ export function QueryControls({
                 value={f.values.join(',')}
                 onChange={(e) => {
                   const next = [...filters];
-                  next[i] = { ...f, values: e.target.value.split(',').map((v) => v.trim()) };
+                  next[i] = {
+                    ...f,
+                    values: ['in', 'between'].includes(f.op)
+                      ? e.target.value.split(',').map((v) => v.trim())
+                      : [e.target.value],
+                  };
                   update({ filters: next });
                 }}
                 placeholder="Value"
@@ -226,6 +249,7 @@ export function QueryControls({
               <Button
                 variant="ghost"
                 size="icon"
+                type="button"
                 aria-label={`Remove filter ${i + 1}`}
                 onClick={() => update({ filters: filters.filter((_, idx) => idx !== i) })}
               >

@@ -29,6 +29,7 @@ import { api, type Workspace } from '@/lib/api';
 import { useWorkspace } from './workspace-context';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
+import { canLeaveWorkspace } from '@/hooks/use-unsaved-changes';
 import { useToast } from '@/providers/providers';
 const links = [
   ['overview', 'Overview', LayoutDashboard],
@@ -89,7 +90,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
             <select
               aria-label="Current workspace"
               value={workspace.id}
-              onChange={(e) => choose(e.target.value)}
+              onChange={(e) => {
+                if (!choose(e.target.value)) e.currentTarget.value = workspace.id;
+              }}
             >
               {workspaces.map((w) => (
                 <option key={w.id} value={w.id}>
@@ -159,6 +162,7 @@ export function Shell({ children }: { children: React.ReactNode }) {
               aria-label="Sign out"
               onClick={async () => {
                 try {
+                  if (!canLeaveWorkspace()) return;
                   await api('/auth/logout', { method: 'POST' });
                   client.clear();
                   router.push('/');
@@ -240,9 +244,9 @@ export function Shell({ children }: { children: React.ReactNode }) {
                 body: JSON.stringify({ name }),
               });
               await client.invalidateQueries({ queryKey: ['workspaces'] });
-              choose(w.id);
+              const selected = choose(w.id);
               setCreate(false);
-              router.push('/workspace/data-sources');
+              if (selected) router.push('/workspace/data-sources');
               toast('Workspace created');
             } catch (err) {
               toast((err as Error).message, true);

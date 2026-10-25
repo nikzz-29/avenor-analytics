@@ -12,7 +12,7 @@ import { useToast } from '@/providers/providers';
 import { PageHeading } from './common';
 import { QueryControls } from './query-controls';
 export function Reports() {
-  const { base, canEdit } = useWorkspace();
+  const { base, canEdit, locale } = useWorkspace();
   const toast = useToast();
   const client = useQueryClient();
   const [editing, setEditing] = useState<{
@@ -184,6 +184,7 @@ export function Reports() {
           <ErrorState error={result.error} />
         ) : (
           <Chart
+            locale={locale}
             points={result.data.points}
             type="table"
             title="Report results"

@@ -1,7 +1,7 @@
 'use client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ThemeProvider } from 'next-themes';
-import { createContext, useCallback, useContext, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 const ToastContext = createContext<(message: string, error?: boolean) => void>(() => {});
 export const useToast = () => useContext(ToastContext);
 export function Providers({ children }: { children: React.ReactNode }) {
@@ -12,9 +12,12 @@ export function Providers({ children }: { children: React.ReactNode }) {
       }),
   );
   const [toast, setToast] = useState<{ message: string; error: boolean } | null>(null);
+  const timer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  useEffect(() => () => clearTimeout(timer.current), []);
   const notify = useCallback((message: string, error = false) => {
+    clearTimeout(timer.current);
     setToast({ message, error });
-    setTimeout(() => setToast(null), 6000);
+    timer.current = setTimeout(() => setToast(null), 6000);
   }, []);
   return (
     <ThemeProvider attribute="class" defaultTheme="system" enableSystem>

@@ -146,7 +146,6 @@ export function Settings() {
                   method: 'PATCH',
                   body: JSON.stringify({
                     name: wsName,
-                    default_dashboard_id: workspace.default_dashboard_id,
                   }),
                 });
                 await client.invalidateQueries({ queryKey: ['workspaces'] });

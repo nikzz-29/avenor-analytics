@@ -45,6 +45,7 @@ export function Overview() {
   const [grouping, setGrouping] = useState('month');
   const query = useQuery({
     queryKey: [base, 'overview', period.params, grouping],
+    enabled: period.ready,
     queryFn: () =>
       api<Schema['OverviewOut']>(
         `${base}/analytics/overview?${period.params}&grouping=${grouping}`,
@@ -52,6 +53,7 @@ export function Overview() {
   });
   const top = useQuery({
     queryKey: [base, 'top-products', period.params],
+    enabled: period.ready,
     queryFn: () =>
       api<Schema['EntityPage']>(`${base}/analytics/entities/products?${period.params}&page_size=5`),
   });
@@ -127,6 +129,7 @@ export function Overview() {
             start: period.start,
             end: period.end,
             grouping: grouping as 'month',
+            limit: 500,
           }).catch((e) => toast(e.message, true))
         }
       />
@@ -207,6 +210,7 @@ export function Overview() {
                   )}
                 </div>
                 <Chart
+                  locale={locale}
                   points={data.trend}
                   comparison={data.comparison}
                   title="Net revenue"
@@ -219,6 +223,7 @@ export function Overview() {
                 action={<span className="subtle-label">NET SALES</span>}
               >
                 <Chart
+                  locale={locale}
                   points={data.categories}
                   type="horizontal"
                   title="Category revenue"
@@ -294,6 +299,7 @@ export function Overview() {
               </Panel>
               <Panel title="Sales channels" subtitle="Every path to a purchase.">
                 <Chart
+                  locale={locale}
                   points={data.channels}
                   type="donut"
                   title="Revenue by channel"

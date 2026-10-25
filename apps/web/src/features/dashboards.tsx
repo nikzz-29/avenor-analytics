@@ -2,7 +2,7 @@
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import {
   DndContext,
   KeyboardSensor,
@@ -41,6 +41,7 @@ import { Empty, ErrorState, Loading } from '@/components/ui/states';
 import { useToast } from '@/providers/providers';
 import { useWorkspace } from './workspace-context';
 import { PageHeading } from './common';
+import { useUnsavedChanges } from '@/hooks/use-unsaved-changes';
 import { QueryControls } from './query-controls';
 function newWidget(): Widget {
   return {
@@ -224,6 +225,7 @@ export function Dashboards() {
               try {
                 await api(`${base}/dashboards/${remove.id}`, { method: 'DELETE' });
                 await client.invalidateQueries({ queryKey: [base, 'dashboards'] });
+                await client.invalidateQueries({ queryKey: ['workspaces'] });
                 setRemove(null);
                 toast('Dashboard deleted');
               } catch (e) {
@@ -241,7 +243,7 @@ export function Dashboards() {
   );
 }
 function WidgetContent({ widget }: { widget: Widget }) {
-  const { base } = useWorkspace();
+  const { base, locale } = useWorkspace();
   const result = useQuery({
     queryKey: [base, 'widget', widget.query],
     queryFn: () =>
@@ -257,6 +259,7 @@ function WidgetContent({ widget }: { widget: Widget }) {
   if (result.error) return <ErrorState error={result.error} retry={() => result.refetch()} />;
   return (
     <Chart
+      locale={locale}
       points={result.data.points}
       total={result.data.total}
       type={widget.type}
@@ -373,6 +376,7 @@ function DashboardEditor({ id }: { id: string }) {
   const [dirty, setDirty] = useState(false);
   const [editing, setEditing] = useState<Widget | null>(null);
   const [rename, setRename] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
   const [busy, setBusy] = useState(false);
   const result = useQuery({
     queryKey: [base, 'dashboard', id],
@@ -382,14 +386,8 @@ function DashboardEditor({ id }: { id: string }) {
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
     useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates }),
   );
-  useEffect(() => {
-    const handler = (e: BeforeUnloadEvent) => {
-      if (dirty) e.preventDefault();
-    };
-    window.addEventListener('beforeunload', handler);
-    return () => window.removeEventListener('beforeunload', handler);
-  }, [dirty]);
-  const draft = edited || result.data;
+  useUnsavedChanges(dirty);
+  const draft = dirty ? edited : result.data;
   function change(next: Dashboard) {
     setDraft(next);
     setDirty(true);
@@ -410,8 +408,9 @@ function DashboardEditor({ id }: { id: string }) {
         }),
       });
       client.setQueryData([base, 'dashboard', id], updated);
-      setDraft(updated);
+      setDraft(null);
       setDirty(false);
+      await client.invalidateQueries({ queryKey: [base, 'dashboard', id] });
       await client.invalidateQueries({ queryKey: [base, 'dashboards'] });
       toast('Dashboard saved');
     } catch (e) {
@@ -437,13 +436,20 @@ function DashboardEditor({ id }: { id: string }) {
       >
         {canEdit && (
           <>
-            <Button variant="outline" onClick={() => setRename(true)}>
+            <Button
+              variant="outline"
+              disabled={busy}
+              onClick={() => {
+                setRenameValue(draft.name);
+                setRename(true);
+              }}
+            >
               <Pencil size={15} />
               Rename
             </Button>
             <Button
               variant="outline"
-              disabled={draft.widgets.length >= 30}
+              disabled={busy || draft.widgets.length >= 30}
               onClick={() => setEditing(newWidget())}
             >
               <Plus size={15} />
@@ -464,7 +470,7 @@ function DashboardEditor({ id }: { id: string }) {
             try {
               await api(base, {
                 method: 'PATCH',
-                body: JSON.stringify({ name: workspace.name, default_dashboard_id: id }),
+                body: JSON.stringify({ default_dashboard_id: id }),
               });
               await client.invalidateQueries({ queryKey: ['workspaces'] });
               toast('Default dashboard updated');
@@ -483,7 +489,7 @@ function DashboardEditor({ id }: { id: string }) {
           description="Add a chart, a metric, or a note. Make it yours."
         >
           {canEdit && (
-            <Button onClick={() => setEditing(newWidget())}>
+            <Button disabled={busy} onClick={() => setEditing(newWidget())}>
               <Plus size={15} />
               Add your first widget
             </Button>
@@ -636,6 +642,7 @@ function DashboardEditor({ id }: { id: string }) {
           className="form-stack"
           onSubmit={(e) => {
             e.preventDefault();
+            change({ ...draft, name: renameValue.trim() });
             setRename(false);
           }}
         >
@@ -644,11 +651,11 @@ function DashboardEditor({ id }: { id: string }) {
             <input
               required
               maxLength={100}
-              value={draft.name}
-              onChange={(e) => change({ ...draft, name: e.target.value })}
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
             />
           </label>
-          <Button>Apply name</Button>
+          <Button disabled={busy || !renameValue.trim()}>Apply name</Button>
         </form>
       </Dialog>
     </>

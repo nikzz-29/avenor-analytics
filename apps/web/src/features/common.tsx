@@ -1,8 +1,10 @@
 'use client';
 import { CalendarDays, ArrowDownToLine, RefreshCw } from 'lucide-react';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/button';
 import { useState } from 'react';
+import { api, type Schema } from '@/lib/api';
+import { useWorkspace } from './workspace-context';
 import { motion, useReducedMotion } from 'motion/react';
 export function PageHeading({
   eyebrow,
@@ -33,9 +35,29 @@ export function PageHeading({
   );
 }
 export function usePeriod() {
-  const [start, setStart] = useState('2025-01-01');
-  const [end, setEnd] = useState('2025-12-31');
-  return { start, end, setStart, setEnd, params: new URLSearchParams({ start, end }).toString() };
+  const { base } = useWorkspace();
+  const bounds = useQuery({
+    queryKey: [base, 'period'],
+    queryFn: () => api<Schema['DataPeriod']>(`${base}/analytics/period`),
+  });
+  const year = new Date().getUTCFullYear();
+  const defaults = bounds.data || { start: `${year}-01-01`, end: `${year}-12-31` };
+  const [custom, setCustom] = useState<{ start: string; end: string } | null>(null);
+  const start = custom?.start || defaults.start,
+    end = custom?.end || defaults.end;
+  const setStart = (next: string) => setCustom({ start: next, end });
+  const setEnd = (next: string) => setCustom({ start, end: next });
+  const setRange = (nextStart: string, nextEnd: string) =>
+    setCustom({ start: nextStart, end: nextEnd });
+  return {
+    start,
+    end,
+    setStart,
+    setEnd,
+    setRange,
+    ready: custom !== null || !bounds.isPending,
+    params: new URLSearchParams({ start, end }).toString(),
+  };
 }
 export function PeriodFilter({
   period,
@@ -49,6 +71,16 @@ export function PeriodFilter({
   setGrouping?: (value: string) => void;
 }) {
   const client = useQueryClient();
+  const year = new Date().getUTCFullYear();
+  const today = new Date().toISOString().slice(0, 10);
+  const preset =
+    period.start === '2025-01-01' && period.end === '2025-12-31'
+      ? '2025'
+      : period.start === '2025-10-01' && period.end === '2025-12-31'
+        ? 'q4'
+        : period.start === `${year}-01-01` && period.end === today
+          ? 'year'
+          : 'custom';
   return (
     <div className="filterbar">
       <div className="date-fields">
@@ -81,21 +113,21 @@ export function PeriodFilter({
       </div>
       <select
         aria-label="Date preset"
-        defaultValue="2025"
+        value={preset}
         onChange={(e) => {
           const value = e.target.value;
           if (value === '2025') {
-            period.setStart('2025-01-01');
-            period.setEnd('2025-12-31');
+            period.setRange('2025-01-01', '2025-12-31');
           } else if (value === 'q4') {
-            period.setStart('2025-10-01');
-            period.setEnd('2025-12-31');
-          } else {
-            period.setStart(`${new Date().getFullYear()}-01-01`);
-            period.setEnd(new Date().toISOString().slice(0, 10));
+            period.setRange('2025-10-01', '2025-12-31');
+          } else if (value === 'year') {
+            period.setRange(`${year}-01-01`, today);
           }
         }}
       >
+        <option value="custom" disabled>
+          Custom period
+        </option>
         <option value="2025">Demo year · 2025</option>
         <option value="q4">Demo · Last quarter</option>
         <option value="year">This year</option>
@@ -158,6 +190,7 @@ export function Panel({
 
 export function usePagination(resetKey: string) {
   const [state, setState] = useState({ key: resetKey, page: 1 });
+  if (state.key !== resetKey) setState({ key: resetKey, page: 1 });
   const page = state.key === resetKey ? state.page : 1;
   return [page, (next: number) => setState({ key: resetKey, page: next })] as const;
 }

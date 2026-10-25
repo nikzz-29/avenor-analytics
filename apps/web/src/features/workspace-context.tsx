@@ -6,13 +6,14 @@ import { ApiError, api, type User, type Workspace } from '@/lib/api';
 import { Loading, ErrorState } from '@/components/ui/states';
 import { Button } from '@/components/ui/button';
 import { useTheme } from 'next-themes';
+import { canLeaveWorkspace } from '@/hooks/use-unsaved-changes';
 import { useToast } from '@/providers/providers';
 
 type Context = {
   user: User;
   workspaces: Workspace[];
   workspace: Workspace;
-  choose: (id: string) => void;
+  choose: (id: string) => boolean;
   base: string;
   canEdit: boolean;
   locale: string;
@@ -44,11 +45,14 @@ export function WorkspaceProvider({ children }: { children: React.ReactNode }) {
     if (me.error instanceof ApiError && me.error.status === 401) router.replace('/sign-in');
   }, [me.error, router]);
   useEffect(() => {
-    if (me.data?.preferences.theme) setTheme(me.data.preferences.theme);
+    if (me.data?.preferences.theme && !localStorage.getItem('theme'))
+      setTheme(me.data.preferences.theme);
   }, [me.data?.preferences.theme, setTheme]);
   const choose = (id: string) => {
+    if (!canLeaveWorkspace()) return false;
     setSelected(id);
     localStorage.setItem('avenor_workspace', id);
+    return true;
   };
   if (me.isPending || (me.data && workspaces.isPending)) return <Loading />;
   if (me.error) return <ErrorState error={me.error} retry={() => me.refetch()} />;

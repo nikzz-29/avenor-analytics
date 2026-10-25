@@ -114,6 +114,7 @@ export function Sales() {
   const [sort, setSort] = useState('-date');
   const result = useQuery({
     queryKey: [base, 'sales', period.params, page, search, status, sort],
+    enabled: period.ready,
     queryFn: () =>
       api<Schema['SalesPage']>(
         `${base}/analytics/sales?${period.params}&page=${page}&search=${encodeURIComponent(search)}&status=${status}&sort=${sort}`,
@@ -121,10 +122,12 @@ export function Sales() {
   });
   const overview = useQuery({
     queryKey: [base, 'overview', period.params],
+    enabled: period.ready,
     queryFn: () => api<Schema['OverviewOut']>(`${base}/analytics/overview?${period.params}`),
   });
   const statuses = useQuery({
     queryKey: [base, 'statuses', period.params],
+    enabled: period.ready,
     queryFn: () =>
       api<Schema['QueryOut']>(`${base}/analytics/query`, {
         method: 'POST',
@@ -163,7 +166,7 @@ export function Sales() {
     {
       id: 'revenue',
       header: 'NET SALES',
-      cell: ({ row }) => money(row.original.net_revenue, locale),
+      cell: ({ row }) => money(row.original.net_revenue, locale, 2),
     },
   ];
   return (
@@ -220,7 +223,9 @@ export function Sales() {
           {overview.isPending ? (
             <Loading />
           ) : (
-            overview.data && <Chart points={overview.data.trend} title="Sales revenue" />
+            overview.data && (
+              <Chart locale={locale} points={overview.data.trend} title="Sales revenue" />
+            )
           )}
         </Panel>
         <Panel title="Order status" subtitle="All imported lines, including unfulfilled orders.">
@@ -228,6 +233,7 @@ export function Sales() {
             <ErrorState error={statuses.error} />
           ) : (
             <Chart
+              locale={locale}
               points={statuses.data?.points || []}
               type="bar"
               title="Order lines by status"
@@ -303,6 +309,7 @@ export function Entities({ kind }: { kind: 'customers' | 'products' }) {
   const title = kind === 'customers' ? 'Customers' : 'Products';
   const result = useQuery({
     queryKey: [base, kind, period.params, page, search],
+    enabled: period.ready,
     queryFn: () =>
       api<Schema['EntityPage']>(
         `${base}/analytics/entities/${kind}?${period.params}&page=${page}&search=${encodeURIComponent(search)}`,
@@ -341,7 +348,7 @@ export function Entities({ kind }: { kind: 'customers' | 'products' }) {
     {
       accessorKey: 'revenue',
       header: 'NET REVENUE',
-      cell: (c) => money(c.getValue<string>(), locale),
+      cell: (c) => money(c.getValue<string>(), locale, 2),
     },
     { accessorKey: 'orders', header: 'ORDERS', cell: (c) => number(c.getValue<number>(), locale) },
     { accessorKey: 'units', header: 'UNITS' },
@@ -429,7 +436,7 @@ export function Entities({ kind }: { kind: 'customers' | 'products' }) {
             ) : selected.error ? (
               <ErrorState error={selected.error} />
             ) : (
-              <Chart points={selected.data?.points || []} title="Purchase trend" />
+              <Chart locale={locale} points={selected.data?.points || []} title="Purchase trend" />
             )}
           </>
         )}

@@ -60,7 +60,11 @@ export function Sources() {
     queryFn: () => api<Schema['SaleOut'][]>(`${base}/datasets/${detail?.id}/preview`),
     enabled: !!detail,
   });
-  const refresh = () => client.invalidateQueries({ queryKey: [base] });
+  const refresh = () =>
+    Promise.all([
+      client.invalidateQueries({ queryKey: [base] }),
+      client.invalidateQueries({ queryKey: ['workspaces'] }),
+    ]);
   const begin = () => {
     setFile(null);
     setPreview(null);

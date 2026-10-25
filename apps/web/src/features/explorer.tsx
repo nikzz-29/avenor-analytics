@@ -1,6 +1,6 @@
 'use client';
 import { useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowDownToLine, Play, Save, Plus } from 'lucide-react';
 import {
   api,
@@ -20,8 +20,9 @@ import { useWorkspace } from './workspace-context';
 import { PageHeading, Panel } from './common';
 import { QueryControls } from './query-controls';
 export function Explorer() {
-  const { base, canEdit } = useWorkspace();
+  const { base, canEdit, locale } = useWorkspace();
   const toast = useToast();
+  const client = useQueryClient();
   const [draft, setDraft] = useState<AnalyticsQuery>(defaultQuery);
   const [query, setQuery] = useState<AnalyticsQuery>(defaultQuery);
   const [type, setType] = useState<Widget['type']>('area');
@@ -100,6 +101,7 @@ export function Explorer() {
             <ErrorState error={result.error} retry={() => result.refetch()} />
           ) : (
             <Chart
+              locale={locale}
               points={result.data?.points || []}
               total={result.data?.total}
               type={type}
@@ -139,6 +141,7 @@ export function Explorer() {
                 method: 'POST',
                 body: JSON.stringify({ name, query }),
               });
+              await client.invalidateQueries({ queryKey: [base, 'reports'] });
               toast('Report saved');
               setSave(false);
             } catch (err) {
@@ -186,6 +189,8 @@ export function Explorer() {
                       revision: d.revision,
                     }),
                   });
+                  await client.invalidateQueries({ queryKey: [base, 'dashboards'] });
+                  await client.invalidateQueries({ queryKey: [base, 'dashboard', d.id] });
                   toast('Chart added');
                   setBoard(false);
                 } catch (e) {

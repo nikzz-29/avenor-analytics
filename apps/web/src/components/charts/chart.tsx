@@ -21,6 +21,7 @@ export function Chart({
   currency = true,
   comparison = [],
   total,
+  locale = 'en-US',
 }: {
   points: Point[];
   type?: string;
@@ -29,6 +30,7 @@ export function Chart({
   currency?: boolean;
   comparison?: Point[];
   total?: string | number | null;
+  locale?: string;
 }) {
   const { resolvedTheme } = useTheme();
   const dark = resolvedTheme === 'dark';
@@ -44,7 +46,7 @@ export function Chart({
   if (type === 'kpi')
     return (
       <div className="widget-kpi">
-        {currency ? money(total) : number(total)}
+        {currency ? money(total, locale, 2) : number(total, locale)}
         <small>{title}</small>
       </div>
     );
@@ -62,13 +64,21 @@ export function Chart({
         <tr>
           <th>Dimension</th>
           <th>Value</th>
+          {comparison.length > 0 && <th>Previous period</th>}
         </tr>
       </thead>
       <tbody>
         {points.map((p) => (
           <tr key={p.label}>
             <td>{p.label}</td>
-            <td>{currency ? money(p.value) : number(p.value)}</td>
+            <td>{currency ? money(p.value, locale, 2) : number(p.value, locale)}</td>
+            {comparison.length > 0 && (
+              <td>
+                {currency
+                  ? money(comparison.find((point) => point.label === p.label)?.value, locale, 2)
+                  : number(comparison.find((point) => point.label === p.label)?.value, locale)}
+              </td>
+            )}
           </tr>
         ))}
       </tbody>
@@ -83,6 +93,10 @@ export function Chart({
           month: 'short',
           day: points.every((point) => point.label.endsWith('-01')) ? undefined : 'numeric',
           timeZone: 'UTC',
+          year:
+            new Set(points.map((point) => point.label.slice(0, 4))).size > 1
+              ? 'numeric'
+              : undefined,
         })
       : p.label,
   );
@@ -120,6 +134,12 @@ export function Chart({
       borderColor: border,
       textStyle: { color: dark ? '#edf2ee' : '#18201d' },
       confine: true,
+      valueFormatter: (value: number | null) =>
+        value == null
+          ? 'Not available'
+          : currency
+            ? money(value, locale, 2)
+            : number(value, locale),
     },
     legend: donut
       ? { bottom: 0, textStyle: { color: text }, icon: 'circle', itemWidth: 8, itemHeight: 8 }
@@ -135,7 +155,10 @@ export function Chart({
             center: ['50%', '43%'],
             label: { show: false },
             itemStyle: { borderColor: dark ? '#191f1b' : '#fff', borderWidth: 4 },
-            data: points.map((p) => ({ name: p.label, value: Number(p.value) })),
+            data: points.map((p) => ({
+              name: p.label,
+              value: p.value == null ? null : Number(p.value),
+            })),
           },
         ]
       : [
@@ -151,7 +174,7 @@ export function Chart({
             itemStyle: { color: accent, borderRadius: horizontal ? [0, 3, 3, 0] : [3, 3, 0, 0] },
             areaStyle: type === 'area' ? { color: dark ? '#62c5ae15' : '#147d700d' } : undefined,
             lineStyle: { width: 2.5 },
-            data: points.map((p) => Number(p.value)),
+            data: points.map((p) => (p.value == null ? null : Number(p.value))),
           },
           ...(comparison.length
             ? [
@@ -162,7 +185,7 @@ export function Chart({
                   showSymbol: false,
                   lineStyle: { color: '#a8b5ad', type: 'dashed', width: 1.5 },
                   itemStyle: { color: '#a8b5ad' },
-                  data: comparison.map((p) => Number(p.value)),
+                  data: comparison.map((p) => (p.value == null ? null : Number(p.value))),
                 },
               ]
             : []),
