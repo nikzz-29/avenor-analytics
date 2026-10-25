@@ -10,7 +10,7 @@ import { Dialog } from '@/components/ui/dialog';
 import { Empty, ErrorState, Loading } from '@/components/ui/states';
 import { useWorkspace } from './workspace-context';
 import { useToast } from '@/providers/providers';
-import { PageHeading, Panel, PeriodFilter, usePeriod } from './common';
+import { PageHeading, Panel, PeriodFilter, usePeriod, usePagination } from './common';
 export function DataTable<T>({ data, columns }: { data: T[]; columns: ColumnDef<T>[] }) {
   'use no memo';
   const table = useReactTable({ data, columns, getCoreRowModel: getCoreRowModel() });
@@ -108,7 +108,7 @@ export function Sales() {
   const { base, locale, dateFormat } = useWorkspace();
   const toast = useToast();
   const period = usePeriod();
-  const [page, setPage] = useState(1);
+  const [page, setPage] = usePagination(period.params);
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState('');
   const [sort, setSort] = useState('-date');
@@ -297,7 +297,7 @@ export function Sales() {
 export function Entities({ kind }: { kind: 'customers' | 'products' }) {
   const { base, locale, dateFormat } = useWorkspace();
   const period = usePeriod();
-  const [page, setPage] = useState(1);
+  const [page, setPage] = usePagination(period.params);
   const [search, setSearch] = useState('');
   const [detail, setDetail] = useState<Schema['EntityRow'] | null>(null);
   const title = kind === 'customers' ? 'Customers' : 'Products';

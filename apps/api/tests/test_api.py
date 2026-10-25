@@ -180,6 +180,7 @@ async def test_viewer_permissions(client: httpx.AsyncClient) -> None:
     client.headers["x-csrf-token"] = client.cookies["avenor_csrf"]
     assert (await client.get(base + "/datasets")).status_code == 200
     assert (await client.post(base + "/analytics/query", json={})).status_code == 200
+    assert (await client.post(base + "/analytics/sales/export", json={})).status_code == 200
     assert (await client.post(base + "/dashboards", json={"name": "No"})).status_code == 403
     assert (
         await client.put(base + "/members", json={"email": "viewer@example.com", "role": "admin"})
@@ -301,3 +302,61 @@ async def test_raw_export_matches_customer_search(client: httpx.AsyncClient) -> 
     )
     assert result.status_code == 200
     assert "Bag" in result.text and "Lamp" not in result.text
+
+
+async def test_transaction_is_committed_before_response_headers(client: httpx.AsyncClient) -> None:
+    """A browser may refetch immediately after headers/body; it must see the new data."""
+    import json
+    from uuid import uuid4
+
+    from sqlalchemy import select
+    from sqlalchemy.ext.asyncio import create_async_engine
+    from sqlalchemy.pool import NullPool
+
+    from app.db.models import User
+    from app.main import app
+    from tests.conftest import TEST_URL
+
+    email = f"commit-{uuid4().hex[:8]}@example.com"
+    body = json.dumps(
+        {"email": email, "name": "Commit timing", "password": "strong-password-2026"}
+    ).encode()
+    observed = []
+    consumed = False
+
+    async def receive():
+        nonlocal consumed
+        if consumed:
+            import asyncio
+
+            await asyncio.sleep(10)
+            return {"type": "http.disconnect"}
+        consumed = True
+        return {"type": "http.request", "body": body, "more_body": False}
+
+    async def send(message):
+        if message["type"] == "http.response.start" and message["status"] == 201:
+            engine = create_async_engine(TEST_URL, poolclass=NullPool)
+            async with engine.connect() as connection:
+                observed.append(await connection.scalar(select(User.id).where(User.email == email)))
+            await engine.dispose()
+
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "POST",
+        "scheme": "http",
+        "path": "/api/v1/auth/register",
+        "raw_path": b"/api/v1/auth/register",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [
+            (b"content-type", b"application/json"),
+            (b"content-length", str(len(body)).encode()),
+        ],
+        "client": ("127.0.0.1", 123),
+        "server": ("test", 80),
+    }
+    await app(scope, receive, send)
+    assert len(observed) == 1 and observed[0] is not None

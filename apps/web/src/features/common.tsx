@@ -155,3 +155,9 @@ export function Panel({
     </section>
   );
 }
+
+export function usePagination(resetKey: string) {
+  const [state, setState] = useState({ key: resetKey, page: 1 });
+  const page = state.key === resetKey ? state.page : 1;
+  return [page, (next: number) => setState({ key: resetKey, page: next })] as const;
+}

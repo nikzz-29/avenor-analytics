@@ -1,5 +1,6 @@
 import { describe, expect, it, vi, afterEach } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render, renderHook, screen } from '@testing-library/react';
+import { usePagination } from '@/features/common';
 import { api, ApiError, money, number } from '@/lib/api';
 import { DataTable } from '@/features/tables';
 import { Dialog } from '@/components/ui/dialog';
@@ -27,17 +28,15 @@ describe('API boundary', () => {
   it('exposes server field errors', async () => {
     vi.stubGlobal(
       'fetch',
-      vi
-        .fn()
-        .mockResolvedValue(
-          new Response(
-            JSON.stringify({
-              detail: 'Invalid',
-              errors: [{ field: 'body.email', message: 'Invalid email' }],
-            }),
-            { status: 422 },
-          ),
+      vi.fn().mockResolvedValue(
+        new Response(
+          JSON.stringify({
+            detail: 'Invalid',
+            errors: [{ field: 'body.email', message: 'Invalid email' }],
+          }),
+          { status: 422 },
         ),
+      ),
     );
     await expect(api('/example')).rejects.toThrow('email: Invalid email');
   });
@@ -102,4 +101,14 @@ describe('accessible states and dialog', () => {
     render(<Empty title="No reports" description="Create a report to keep an insight." />);
     expect(screen.getByText('Create a report to keep an insight.')).toBeVisible();
   });
+});
+
+it('resets pagination when the date range changes', () => {
+  const { result, rerender } = renderHook(({ key }) => usePagination(key), {
+    initialProps: { key: 'year' },
+  });
+  act(() => result.current[1](5));
+  expect(result.current[0]).toBe(5);
+  rerender({ key: 'quarter' });
+  expect(result.current[0]).toBe(1);
 });

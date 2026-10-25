@@ -14,7 +14,7 @@ from app.core.config import settings
 from app.db.models import Member, Session, User
 from app.db.session import get_db
 
-DB = Annotated[AsyncSession, Depends(get_db)]
+DB = Annotated[AsyncSession, Depends(get_db, scope="function")]
 hasher = PasswordHasher()
 DUMMY_HASH = hasher.hash(secrets.token_urlsafe(32))
 _attempts: dict[str, deque[float]] = defaultdict(deque)
@@ -70,7 +70,9 @@ async def membership(workspace_id: str, request: Request, user: CurrentUser, db:
         raise HTTPException(404, "Workspace not found")
     if request.method not in ("GET", "HEAD", "OPTIONS") and member.role == "viewer":
         # Query and export are read operations despite using POST.
-        if not request.url.path.endswith(("/analytics/query", "/analytics/export")):
+        if not request.url.path.endswith(
+            ("/analytics/query", "/analytics/export", "/analytics/sales/export")
+        ):
             raise HTTPException(403, "Editor access is required")
     return member
 
