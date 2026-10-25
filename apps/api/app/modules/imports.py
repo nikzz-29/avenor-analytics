@@ -2,6 +2,7 @@ import csv
 import hashlib
 import io
 import json
+import re
 import zipfile
 from datetime import date, datetime
 from decimal import Decimal
@@ -13,12 +14,13 @@ import openpyxl
 import polars as pl
 from defusedxml.common import DefusedXmlException
 from fastapi import APIRouter, File, Form, HTTPException, Query, Response, UploadFile
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator, model_validator
 from sqlalchemy import delete, insert, select
 from starlette.concurrency import run_in_threadpool
 
-from app.core.security import DB, Membership
-from app.db.models import AuditLog, Dataset, ImportJob, Sale, Workspace
+from app.core.security import DB, Membership, lock_workspace
+from app.core.validation import CleanText
+from app.db.models import AuditLog, Dataset, ImportJob, Sale
 from app.modules.analytics import csv_response
 from app.modules.schemas import (
     DatasetOut,
@@ -48,6 +50,13 @@ class SaleInput(BaseModel):
     discount: Decimal = Field(default=Decimal(0), ge=0, max_digits=14, decimal_places=2)
     refund: Decimal = Field(default=Decimal(0), ge=0, max_digits=14, decimal_places=2)
 
+    @field_validator("order_date", mode="before")
+    @classmethod
+    def iso_date(cls, value: object) -> object:
+        if isinstance(value, str) and not re.fullmatch(r"[0-9]{4}-[0-9]{2}-[0-9]{2}", value):
+            raise ValueError("Use an ISO date in YYYY-MM-DD format, not a timestamp")
+        return value
+
     @model_validator(mode="after")
     def money(self) -> "SaleInput":
         gross = self.quantity * self.unit_price
@@ -60,26 +69,36 @@ class SaleInput(BaseModel):
         return self
 
 
+class ParsedRow(dict[str, str]):
+    """Keep the original spreadsheet/CSV line without leaking metadata as a column."""
+
+    def __init__(self, data: dict[str, str], source_row: int) -> None:
+        super().__init__(data)
+        self.source_row = source_row
+
+
 def parse_file(content: bytes, filename: str) -> tuple[list[str], list[dict[str, str]]]:
     if not content or len(content) > MAX_BYTES:
         raise ValueError("Choose a non-empty file up to 10 MiB")
     suffix = PurePath(filename).suffix.lower()
-    raw_rows: list[list[object]] = []
+    raw_rows: list[tuple[int, list[object]]] = []
     if suffix == ".csv":
         try:
             text = content.decode("utf-8-sig")
-            dialect = csv.Sniffer().sniff(text[:8192], delimiters=",;\t")
             if "\x00" in text:
                 raise ValueError("CSV must not contain binary NUL bytes")
-            for physical_row, row in enumerate(csv.reader(io.StringIO(text), dialect)):
-                if physical_row > MAX_ROWS:
+            dialect = csv.Sniffer().sniff(text[:8192], delimiters=",;\t")
+            reader = csv.reader(io.StringIO(text), dialect, strict=True)
+            previous_line = 0
+            for record, row in enumerate(reader):
+                source_row = previous_line + 1
+                previous_line = reader.line_num
+                if record > MAX_ROWS:
                     raise ValueError("Maximum 100,000 rows per import")
                 if any(cell.strip() for cell in row):
-                    raw_rows.append(list(row))
-                if len(raw_rows) > MAX_ROWS + 1:
-                    raise ValueError("Maximum 100,000 rows per import")
+                    raw_rows.append((source_row, list(row)))
         except (UnicodeDecodeError, csv.Error) as exc:
-            raise ValueError("Expected UTF-8 CSV with a header row") from exc
+            raise ValueError("Expected a well-formed UTF-8 CSV with a header row") from exc
     elif suffix == ".xlsx":
         try:
             with zipfile.ZipFile(io.BytesIO(content)) as archive:
@@ -90,29 +109,36 @@ def parse_file(content: bytes, filename: str) -> tuple[list[str], list[dict[str,
             workbook = openpyxl.load_workbook(
                 io.BytesIO(content), read_only=True, data_only=False, keep_links=False
             )
-            sheet = workbook.active
-            if sheet is None:
-                raise ValueError("Spreadsheet has no worksheet")
-            if sheet.max_row and sheet.max_row > MAX_ROWS + 1:
-                raise ValueError("Maximum 100,000 worksheet rows per import")
-            if sheet.max_column and sheet.max_column > 50:
-                raise ValueError("Maximum 50 columns")
-            for cells in sheet.iter_rows():
-                if any(cell.data_type == "f" for cell in cells):
-                    raise ValueError("Spreadsheet formulas are not supported; export values first")
-                values: list[object] = [cell.value for cell in cells]
-                if any(v is not None for v in values):
-                    raw_rows.append(values)
-                if len(raw_rows) > MAX_ROWS + 1:
-                    raise ValueError("Maximum 100,000 rows per import")
-            workbook.close()
+            try:
+                sheet = workbook.active
+                if sheet is None:
+                    raise ValueError("Spreadsheet has no worksheet")
+                if sheet.max_row and sheet.max_row > MAX_ROWS + 1:
+                    raise ValueError("Maximum 100,000 worksheet rows per import")
+                if sheet.max_column and sheet.max_column > 50:
+                    raise ValueError("Maximum 50 columns")
+                for source_row, cells in enumerate(sheet.iter_rows(), start=1):
+                    # Enforce actual limits even when worksheet dimensions are omitted or false.
+                    if source_row > MAX_ROWS + 1:
+                        raise ValueError("Maximum 100,000 worksheet rows per import")
+                    if len(cells) > 50:
+                        raise ValueError("Maximum 50 columns")
+                    if any(cell.data_type == "f" for cell in cells):
+                        raise ValueError(
+                            "Spreadsheet formulas are not supported; export values first"
+                        )
+                    values: list[object] = [cell.value for cell in cells]
+                    if any(v is not None for v in values):
+                        raw_rows.append((source_row, values))
+            finally:
+                workbook.close()
         except (zipfile.BadZipFile, KeyError, OSError, ParseError, DefusedXmlException) as exc:
             raise ValueError("Invalid XLSX file") from exc
     else:
         raise ValueError("Only CSV and XLSX files are supported")
     if len(raw_rows) < 2:
         raise ValueError("Include a header and at least one data row")
-    columns = [str(value or "").strip() for value in raw_rows[0]]
+    columns = [str(value if value is not None else "").strip() for value in raw_rows[0][1]]
     if (
         len(columns) > 50
         or any(not c or len(c) > 200 for c in columns)
@@ -120,9 +146,9 @@ def parse_file(content: bytes, filename: str) -> tuple[list[str], list[dict[str,
     ):
         raise ValueError("Use up to 50 unique, non-empty column names (maximum 200 characters)")
     result: list[dict[str, str]] = []
-    for i, values in enumerate(raw_rows[1:], start=2):
+    for source_row, values in raw_rows[1:]:
         if len(values) != len(columns):
-            raise ValueError(f"Row {i} has {len(values)} columns; expected {len(columns)}")
+            raise ValueError(f"Row {source_row} has {len(values)} columns; expected {len(columns)}")
         normalized = [
             v.date().isoformat()
             if isinstance(v, datetime)
@@ -132,8 +158,8 @@ def parse_file(content: bytes, filename: str) -> tuple[list[str], list[dict[str,
             for v in values
         ]
         if any(len(v) > 2000 for v in normalized):
-            raise ValueError(f"Row {i} contains a cell longer than 2,000 characters")
-        result.append(dict(zip(columns, normalized, strict=True)))
+            raise ValueError(f"Row {source_row} contains a cell longer than 2,000 characters")
+        result.append(ParsedRow(dict(zip(columns, normalized, strict=True)), source_row))
     return columns, result
 
 
@@ -175,6 +201,7 @@ def validate_rows(
     orders: dict[str, tuple[date, str, str, str]] = {}
     invalid = 0
     for index, row in enumerate(rows, start=2):
+        index = row.source_row if isinstance(row, ParsedRow) else index
         mapped = {
             field: row[source]
             for field, source in mapping.items()
@@ -217,11 +244,13 @@ async def import_dataset(
     mapping: str = Form("{}"),
     name: str = Form("Imported sales"),
     mode: Literal["create", "replace"] = Form("create"),
-    dataset_id: str | None = Form(None),
+    dataset_id: CleanText | None = Form(None),
     validate_only: bool = Form(False),
 ) -> ImportOut:
-    if not name.strip() or len(name) > 200:
+    if not name.strip() or len(name) > 200 or "\x00" in name:
         raise HTTPException(422, "Dataset name must be 1–200 characters")
+    if dataset_id and "\x00" in dataset_id:
+        raise HTTPException(422, "Invalid dataset identifier")
     content, columns, rows = await read_file(file)
     try:
         parsed = json.loads(mapping)
@@ -245,7 +274,7 @@ async def import_dataset(
             rejected=rejected,
             errors=errors,
         )
-    await db.scalar(select(Workspace).where(Workspace.id == member.workspace_id).with_for_update())
+    await lock_workspace(db, member.workspace_id)
     target: Dataset | None = None
     if mode == "replace":
         target = await db.scalar(
@@ -308,20 +337,20 @@ async def import_dataset(
                 name=name.strip(),
                 fingerprint=fingerprint,
                 row_count=len(valid),
-                columns=[
-                    {
-                        "name": field,
-                        "type": "number"
-                        if field in ("quantity", "unit_price", "discount", "refund")
-                        else "date"
-                        if field == "order_date"
-                        else "text",
-                    }
-                    for field in parsed
-                ],
             )
             db.add(dataset)
             await db.flush()
+        dataset.columns = [
+            {
+                "name": field,
+                "type": "number"
+                if field in ("quantity", "unit_price", "discount", "refund")
+                else "date"
+                if field == "order_date"
+                else "text",
+            }
+            for field in parsed
+        ]
         for offset in range(0, len(valid), 1000):
             batch = [
                 {**row, "workspace_id": member.workspace_id, "dataset_id": dataset.id}
@@ -352,6 +381,13 @@ async def datasets(member: Membership, db: DB) -> list[Dataset]:
 
 @router.get("/datasets/{dataset_id}/preview", response_model=list[SaleOut])
 async def dataset_preview(dataset_id: str, member: Membership, db: DB) -> list[Sale]:
+    exists = await db.scalar(
+        select(Dataset.id).where(
+            Dataset.id == dataset_id, Dataset.workspace_id == member.workspace_id
+        )
+    )
+    if not exists:
+        raise HTTPException(404, "Dataset not found")
     return list(
         await db.scalars(
             select(Sale)
@@ -363,6 +399,7 @@ async def dataset_preview(dataset_id: str, member: Membership, db: DB) -> list[S
 
 @router.delete("/datasets/{dataset_id}", response_model=dict[str, str])
 async def remove_dataset(dataset_id: str, member: Membership, db: DB) -> dict[str, str]:
+    await lock_workspace(db, member.workspace_id)
     dataset = await db.scalar(
         select(Dataset).where(Dataset.id == dataset_id, Dataset.workspace_id == member.workspace_id)
     )

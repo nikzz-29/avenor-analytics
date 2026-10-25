@@ -364,6 +364,23 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/api/v1/workspaces/{workspace_id}/analytics/period": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /** Data Period */
+        get: operations["data_period_api_v1_workspaces__workspace_id__analytics_period_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/workspaces/{workspace_id}/datasets/preview": {
         parameters: {
             query?: never;
@@ -627,14 +644,14 @@ export interface components {
             /** Name */
             name: string;
             /** Widgets */
-            widgets?: components["schemas"]["Widget"][];
+            widgets?: components["schemas"]["Widget-Input"][];
         };
         /** DashboardOut */
         DashboardOut: {
             /** Name */
             name: string;
             /** Widgets */
-            widgets?: components["schemas"]["Widget"][];
+            widgets?: components["schemas"]["Widget-Output"][];
             /** Id */
             id: string;
             /** Revision */
@@ -650,9 +667,22 @@ export interface components {
             /** Name */
             name: string;
             /** Widgets */
-            widgets?: components["schemas"]["Widget"][];
+            widgets?: components["schemas"]["Widget-Input"][];
             /** Revision */
             revision: number;
+        };
+        /** DataPeriod */
+        DataPeriod: {
+            /**
+             * Start
+             * Format: date
+             */
+            start: string;
+            /**
+             * End
+             * Format: date
+             */
+            end: string;
         };
         /** DatasetOut */
         DatasetOut: {
@@ -861,7 +891,7 @@ export interface components {
             /** Label */
             label: string;
             /** Value */
-            value: string;
+            value: string | null;
         };
         /** PreviewOut */
         PreviewOut: {
@@ -1115,7 +1145,38 @@ export interface components {
             ctx?: Record<string, never>;
         };
         /** Widget */
-        Widget: {
+        "Widget-Input": {
+            /** Id */
+            id: string;
+            /** Title */
+            title: string;
+            /**
+             * Type
+             * @default bar
+             * @enum {string}
+             */
+            type: "line" | "area" | "bar" | "horizontal" | "stacked" | "donut" | "table" | "kpi" | "text";
+            query?: components["schemas"]["QueryIn"];
+            /**
+             * Width
+             * @default 1
+             * @enum {integer}
+             */
+            width: 1 | 2;
+            /**
+             * Height
+             * @default 1
+             * @enum {integer}
+             */
+            height: 1 | 2;
+            /**
+             * Notes
+             * @default
+             */
+            notes: string;
+        };
+        /** Widget */
+        "Widget-Output": {
             /** Id */
             id: string;
             /** Title */
@@ -1172,7 +1233,7 @@ export interface components {
         /** WorkspacePatch */
         WorkspacePatch: {
             /** Name */
-            name: string;
+            name?: string | null;
             /** Default Dashboard Id */
             default_dashboard_id?: string | null;
         };
@@ -1799,7 +1860,7 @@ export interface operations {
                 start?: string | null;
                 end?: string | null;
                 search?: string;
-                status?: string | null;
+                status?: ("" | "paid" | "pending" | "cancelled" | "refunded") | null;
                 page?: number;
                 page_size?: number;
                 sort?: string;
@@ -1927,6 +1988,37 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    data_period_api_v1_workspaces__workspace_id__analytics_period_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DataPeriod"];
                 };
             };
             /** @description Validation Error */

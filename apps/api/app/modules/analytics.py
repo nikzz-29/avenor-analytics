@@ -1,17 +1,19 @@
 import csv
 import io
-from datetime import date, timedelta
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
-from typing import Any
+from typing import Any, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Response
 from sqlalchemy import case, distinct, false, func, select
 from sqlalchemy.sql.elements import ColumnElement
 
 from app.core.security import DB, Membership
-from app.db.models import Dataset, Sale
+from app.core.validation import CleanText
+from app.db.models import Dataset, Sale, Workspace
 from app.modules.schemas import (
     KPI,
+    DataPeriod,
     EntityPage,
     EntityRow,
     OverviewOut,
@@ -35,6 +37,12 @@ CUSTOMER = case((Sale.status.in_(ELIGIBLE), Sale.customer_id), else_=None)
 
 
 async def scope(db: DB, workspace_id: str, query: QueryIn) -> list[ColumnElement[bool]]:
+    # All fact mutations acquire FOR UPDATE on this same workspace. A shared
+    # read lock keeps multi-query responses on one coherent dataset version,
+    # while still allowing analytics requests to run concurrently.
+    await db.execute(
+        select(Workspace.id).where(Workspace.id == workspace_id).with_for_update(read=True)
+    )
     clauses = [Sale.workspace_id == workspace_id]
     if query.dataset_id:
         exists = await db.scalar(
@@ -74,10 +82,12 @@ async def scope(db: DB, workspace_id: str, query: QueryIn) -> list[ColumnElement
     return clauses
 
 
-async def execute_query(db: DB, workspace_id: str, query: QueryIn) -> QueryOut:
+async def execute_query(db: DB, workspace_id: str, query: QueryIn, shift_days: int = 0) -> QueryOut:
     clauses = await scope(db, workspace_id, query)
     if query.dimension == "date":
-        dimension = func.to_char(func.date_trunc(query.grouping, Sale.order_date), "YYYY-MM-DD")
+        dimension = func.to_char(
+            func.date_trunc(query.grouping, Sale.order_date + shift_days), "YYYY-MM-DD"
+        )
     else:
         dimension = getattr(Sale, query.dimension)
     count = func.count(distinct(ORDER))
@@ -86,7 +96,7 @@ async def execute_query(db: DB, workspace_id: str, query: QueryIn) -> QueryOut:
         "revenue": revenue,
         "orders": count,
         "aov": revenue / func.nullif(count, 0),
-        "units": func.sum(UNITS),
+        "units": func.coalesce(func.sum(UNITS), 0),
         "customers": func.count(distinct(CUSTOMER)),
         "sum": revenue,
         "count": func.count(Sale.id),
@@ -95,23 +105,30 @@ async def execute_query(db: DB, workspace_id: str, query: QueryIn) -> QueryOut:
         "minimum": func.min(NET),
         "maximum": func.max(NET),
     }
-    value = func.coalesce(expressions[query.metric], 0)
+    value = (
+        expressions[query.metric]
+        if query.metric in ("aov", "average", "minimum", "maximum")
+        else func.coalesce(expressions[query.metric], 0)
+    )
     statement = (
         select(dimension.label("label"), value.label("value")).where(*clauses).group_by(dimension)
     )
     ordering = (
-        value.desc()
+        value.desc().nulls_last()
         if query.sort == "-value"
-        else value.asc()
+        else value.asc().nulls_last()
         if query.sort == "value"
         else dimension.asc()
     )
-    result = await db.execute(statement.order_by(ordering).limit(query.limit))
+    result = await db.execute(statement.order_by(ordering, dimension.asc()).limit(query.limit))
     total = await db.scalar(select(expressions[query.metric]).where(*clauses))
     return QueryOut(
         total=Decimal(str(total)).quantize(Decimal("0.01")) if total is not None else None,
         points=[
-            Point(label=str(label), value=Decimal(str(v)).quantize(Decimal("0.01")))
+            Point(
+                label=str(label),
+                value=Decimal(str(v)).quantize(Decimal("0.01")) if v is not None else None,
+            )
             for label, v in result
         ],
         metric=query.metric,
@@ -161,6 +178,42 @@ async def calculate_kpi(db: DB, workspace_id: str, query: QueryIn) -> KPI:
     )
 
 
+def period_buckets(start: date, end: date, grouping: str) -> list[str]:
+    bucket = (
+        start.replace(day=1)
+        if grouping == "month"
+        else start - timedelta(days=start.weekday())
+        if grouping == "week"
+        else start
+    )
+    result: list[str] = []
+    while bucket <= end:
+        result.append(bucket.isoformat())
+        if len(result) > 500:
+            raise HTTPException(
+                422,
+                "This period exceeds 500 chart points. Choose a shorter period or a coarser grouping.",
+            )
+        try:
+            bucket = (
+                (
+                    date(bucket.year + 1, 1, 1)
+                    if bucket.month == 12
+                    else date(bucket.year, bucket.month + 1, 1)
+                )
+                if grouping == "month"
+                else bucket + timedelta(days=7 if grouping == "week" else 1)
+            )
+        except (OverflowError, ValueError):
+            break
+    return result
+
+
+def align_points(points: list[Point], buckets: list[str]) -> list[Point]:
+    values = {point.label: point.value for point in points}
+    return [Point(label=label, value=values.get(label, Decimal("0.00"))) for label in buckets]
+
+
 @router.get("/overview", response_model=OverviewOut)
 async def overview(
     member: Membership,
@@ -172,15 +225,22 @@ async def overview(
 ) -> OverviewOut:
     if start > end or grouping not in ("day", "week", "month"):
         raise HTTPException(422, "Invalid date range or grouping")
-    current_query = QueryIn(start=start, end=end, grouping=grouping, dataset_id=dataset_id)
-    duration = end - start + timedelta(days=1)
-    previous_query = current_query.model_copy(
-        update={"start": start - duration, "end": start - timedelta(days=1)}
+    buckets = period_buckets(start, end, grouping)
+    current_query = QueryIn(
+        start=start, end=end, grouping=grouping, dataset_id=dataset_id, limit=500
     )
+    duration = end - start + timedelta(days=1)
+    try:
+        previous_start, previous_end = start - duration, start - timedelta(days=1)
+    except OverflowError as exc:
+        raise HTTPException(422, "Date range has no representable previous period") from exc
+    previous_query = current_query.model_copy(update={"start": previous_start, "end": previous_end})
     current = await calculate_kpi(db, member.workspace_id, current_query)
     previous = await calculate_kpi(db, member.workspace_id, previous_query)
     trend = await execute_query(db, member.workspace_id, current_query)
-    comparison = await execute_query(db, member.workspace_id, previous_query)
+    comparison = await execute_query(
+        db, member.workspace_id, previous_query, shift_days=duration.days
+    )
     categories = await execute_query(
         db,
         member.workspace_id,
@@ -202,8 +262,8 @@ async def overview(
         revenue_growth=growth,
         start=start,
         end=end,
-        trend=trend.points,
-        comparison=comparison.points,
+        trend=align_points(trend.points, buckets),
+        comparison=align_points(comparison.points, buckets),
         categories=categories.points,
         channels=channels.points,
     )
@@ -215,12 +275,14 @@ async def sales(
     db: DB,
     start: date | None = None,
     end: date | None = None,
-    search: str = Query(default="", max_length=100),
-    status: str | None = None,
+    search: CleanText = Query(default="", max_length=100),
+    status: Literal["", "paid", "pending", "cancelled", "refunded"] | None = None,
     page: int = Query(default=1, ge=1, le=100000),
     page_size: int = Query(default=20, ge=1, le=100),
     sort: str = "-date",
 ) -> SalesPage:
+    if start and end and start > end:
+        raise HTTPException(422, "Start date must precede end date")
     clauses = await scope(db, member.workspace_id, QueryIn(start=start, end=end))
     if search:
         clauses.append(
@@ -258,13 +320,15 @@ async def entities(
     db: DB,
     start: date | None = None,
     end: date | None = None,
-    search: str = Query(default="", max_length=100),
-    page: int = Query(default=1, ge=1),
+    search: CleanText = Query(default="", max_length=100),
+    page: int = Query(default=1, ge=1, le=100000),
     page_size: int = Query(default=20, ge=1, le=100),
 ) -> EntityPage:
     if kind not in ("customers", "products"):
         raise HTTPException(404, "Unknown entity")
     dimension = Sale.customer_id if kind == "customers" else Sale.product_name
+    if start and end and start > end:
+        raise HTTPException(422, "Start date must precede end date")
     clauses = await scope(db, member.workspace_id, QueryIn(start=start, end=end))
     clauses.append(Sale.status.in_(ELIGIBLE))
     if search:
@@ -281,7 +345,7 @@ async def entities(
         )
         .where(*clauses)
         .group_by(dimension)
-        .order_by(func.sum(NET).desc())
+        .order_by(func.sum(NET).desc(), dimension.asc())
         .offset((page - 1) * page_size)
         .limit(page_size)
     )
@@ -313,7 +377,10 @@ def csv_response(rows: list[list[str]], filename: str = "avenor-report.csv") -> 
 async def export(data: QueryIn, member: Membership, db: DB) -> Response:
     result = await execute_query(db, member.workspace_id, data)
     return csv_response(
-        [[data.dimension, data.metric], *[[p.label, str(p.value)] for p in result.points]]
+        [
+            [data.dimension, data.metric],
+            *[[p.label, str(p.value) if p.value is not None else ""] for p in result.points],
+        ]
     )
 
 
@@ -358,3 +425,12 @@ async def export_sales(data: SalesExportIn, member: Membership, db: DB) -> Respo
         item = SaleOut.model_validate(row).model_dump(mode="json")
         output.append([str(item[key]) for key in header])
     return csv_response(output, "avenor-sales.csv")
+
+
+@router.get("/period", response_model=DataPeriod)
+async def data_period(member: Membership, db: DB) -> DataPeriod:
+    latest = await db.scalar(
+        select(func.max(Sale.order_date)).where(Sale.workspace_id == member.workspace_id)
+    )
+    year = latest.year if latest else datetime.now(UTC).year
+    return DataPeriod(start=date(year, 1, 1), end=date(year, 12, 31))

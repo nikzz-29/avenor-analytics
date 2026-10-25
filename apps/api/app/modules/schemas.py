@@ -2,9 +2,11 @@ from datetime import date, datetime
 from decimal import Decimal, InvalidOperation
 from typing import Annotated, Literal
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, model_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, model_validator
 
-Name = Annotated[str, Field(min_length=1, max_length=100, pattern=r"\S")]
+from app.core.validation import CleanText
+
+Name = Annotated[CleanText, Field(min_length=1, max_length=100, pattern=r"\S")]
 Role = Literal["owner", "admin", "editor", "viewer"]
 Dimension = Literal["date", "category", "product_name", "customer_id", "channel", "status"]
 Metric = Literal[
@@ -85,8 +87,15 @@ class WorkspaceOut(ORM):
 
 
 class WorkspacePatch(BaseModel):
-    name: Name
-    default_dashboard_id: str | None = None
+    name: Name | None = None
+    default_dashboard_id: Annotated[CleanText, Field(min_length=1, max_length=100)] | None = None
+
+    @field_validator("name")
+    @classmethod
+    def nonnull_name(cls, value: str | None) -> str:
+        if value is None:
+            raise ValueError("Workspace name cannot be null")
+        return value
 
 
 class MemberIn(BaseModel):
@@ -113,7 +122,7 @@ class Filter(BaseModel):
         "order_date",
     ]
     op: Literal["eq", "neq", "contains", "in", "gt", "lt", "between"]
-    values: list[str] = Field(min_length=1, max_length=50)
+    values: list[CleanText] = Field(min_length=1, max_length=50)
 
     @model_validator(mode="after")
     def check_operator(self) -> "Filter":
@@ -131,17 +140,31 @@ class Filter(BaseModel):
                 raise ValueError("Filter value too long")
             if numeric:
                 try:
-                    if not Decimal(value).is_finite():
+                    number = Decimal(value)
+                    if not number.is_finite():
                         raise ValueError("Finite number required")
+                    exponent = number.as_tuple().exponent
+                    if number.copy_abs() > Decimal("1000000000000") or (
+                        isinstance(exponent, int) and abs(exponent) > 12
+                    ):
+                        raise ValueError(
+                            "Filter number must be within ±1 trillion with at most 12 decimal places"
+                        )
                 except InvalidOperation as exc:
                     raise ValueError("Valid number required") from exc
             if dated:
                 date.fromisoformat(value)
+        if self.op == "between":
+            lower, upper = self.values
+            if (numeric and Decimal(lower) > Decimal(upper)) or (
+                dated and date.fromisoformat(lower) > date.fromisoformat(upper)
+            ):
+                raise ValueError("Range start must not exceed range end")
         return self
 
 
 class QueryIn(BaseModel):
-    dataset_id: str | None = None
+    dataset_id: Annotated[CleanText, Field(min_length=1, max_length=100)] | None = None
     metric: Metric = "revenue"
     dimension: Dimension = "date"
     start: date | None = None
@@ -159,14 +182,14 @@ class QueryIn(BaseModel):
 
 
 class SalesExportIn(QueryIn):
-    search: str = Field(default="", max_length=100)
+    search: CleanText = Field(default="", max_length=100)
     status: Literal["paid", "pending", "cancelled", "refunded"] | None = None
     order_sort: Literal["-date", "date", "-revenue", "revenue"] = "-date"
 
 
 class Point(BaseModel):
     label: str
-    value: Decimal
+    value: Decimal | None
 
 
 class QueryOut(BaseModel):
@@ -320,3 +343,8 @@ class ActivityOut(ORM):
     id: int
     action: str
     created_at: datetime
+
+
+class DataPeriod(BaseModel):
+    start: date
+    end: date

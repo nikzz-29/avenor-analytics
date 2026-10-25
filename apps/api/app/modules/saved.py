@@ -1,8 +1,8 @@
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select, update
 
-from app.core.security import DB, Membership
-from app.db.models import AuditLog, Dashboard, Report, Workspace, now
+from app.core.security import DB, Membership, lock_workspace
+from app.db.models import AuditLog, Dashboard, Report, now
 from app.modules.analytics import execute_query
 from app.modules.schemas import (
     DashboardIn,
@@ -93,8 +93,8 @@ async def patch_dashboard(
 
 @router.delete("/dashboards/{dashboard_id}", response_model=Message)
 async def delete_dashboard(dashboard_id: str, member: Membership, db: DB) -> Message:
+    workspace = await lock_workspace(db, member.workspace_id)
     dashboard = await get_dashboard(dashboard_id, member, db)
-    workspace = await db.get(Workspace, member.workspace_id)
     if workspace and workspace.default_dashboard_id == dashboard_id:
         workspace.default_dashboard_id = None
     await db.delete(dashboard)

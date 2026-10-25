@@ -28,6 +28,10 @@ async def request_context(
 ) -> Response:
     request_id = str(uuid.uuid4())
     started = time.monotonic()
+    if "\x00" in request.url.path or any(
+        "\x00" in value for _, value in request.query_params.multi_items()
+    ):
+        return JSONResponse({"detail": "NUL characters are not supported"}, status_code=422)
     if (
         request.headers.get("content-length", "").isdigit()
         and int(request.headers["content-length"]) > 11 * 1024 * 1024

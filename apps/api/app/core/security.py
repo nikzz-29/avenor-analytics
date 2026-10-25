@@ -8,10 +8,11 @@ from typing import Annotated
 
 from argon2 import PasswordHasher
 from fastapi import Depends, HTTPException, Request
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.config import settings
-from app.db.models import Member, Session, User
+from app.db.models import Member, Session, User, Workspace
 from app.db.session import get_db
 
 DB = Annotated[AsyncSession, Depends(get_db, scope="function")]
@@ -83,3 +84,15 @@ Membership = Annotated[Member, Depends(membership)]
 def require_admin(member: Member) -> None:
     if member.role not in ("owner", "admin"):
         raise HTTPException(403, "Workspace admin access is required")
+
+
+async def lock_workspace(db: AsyncSession, workspace_id: str) -> Workspace:
+    workspace = await db.scalar(
+        select(Workspace)
+        .where(Workspace.id == workspace_id)
+        .with_for_update()
+        .execution_options(populate_existing=True)
+    )
+    if workspace is None:
+        raise HTTPException(404, "Workspace not found")
+    return workspace

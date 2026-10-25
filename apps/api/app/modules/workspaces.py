@@ -2,6 +2,7 @@ import secrets
 
 from fastapi import APIRouter, Depends, HTTPException, Response
 from sqlalchemy import delete, select
+from starlette.concurrency import run_in_threadpool
 
 from app.core.security import (
     DB,
@@ -9,6 +10,7 @@ from app.core.security import (
     Membership,
     check_origin,
     hasher,
+    lock_workspace,
     rate_limit,
     require_admin,
 )
@@ -39,7 +41,7 @@ async def demo(response: Response, db: DB) -> User:
         email=f"demo-{secrets.token_hex(12)}@avenor.local",
         name="Alex Morgan",
         demo=True,
-        password_hash=hasher.hash(secrets.token_urlsafe(32)),
+        password_hash=await run_in_threadpool(hasher.hash, secrets.token_urlsafe(32)),
     )
     db.add(user)
     await db.flush()
@@ -75,14 +77,16 @@ async def create_workspace(data: WorkspaceIn, user: CurrentUser, db: DB) -> Work
 @router.patch("/workspaces/{workspace_id}", response_model=WorkspaceOut)
 async def update_workspace(data: WorkspacePatch, member: Membership, db: DB) -> WorkspaceOut:
     require_admin(member)
-    ws = await db.get(Workspace, member.workspace_id)
+    ws = await lock_workspace(db, member.workspace_id)
     assert ws is not None
     if data.default_dashboard_id:
         dashboard = await db.get(Dashboard, data.default_dashboard_id)
         if not dashboard or dashboard.workspace_id != ws.id:
             raise HTTPException(404, "Dashboard not found")
-    ws.name = data.name.strip()
-    ws.default_dashboard_id = data.default_dashboard_id
+    if data.name is not None:
+        ws.name = data.name.strip()
+    if "default_dashboard_id" in data.model_fields_set:
+        ws.default_dashboard_id = data.default_dashboard_id
     await db.flush()
     return WorkspaceOut.model_validate(ws).model_copy(update={"role": member.role})
 
@@ -102,6 +106,7 @@ async def add_member(data: MemberIn, member: Membership, db: DB) -> Message:
     require_admin(member)
     if member.role == "admin" and data.role == "admin":
         raise HTTPException(403, "Only the owner can assign admins")
+    await lock_workspace(db, member.workspace_id)
     user = await db.scalar(select(User).where(User.email == str(data.email).lower()))
     if not user:
         raise HTTPException(404, "Ask this person to create an account first")
@@ -118,6 +123,7 @@ async def add_member(data: MemberIn, member: Membership, db: DB) -> Message:
 @router.delete("/workspaces/{workspace_id}/members/{user_id}", response_model=Message)
 async def remove_member(user_id: str, member: Membership, db: DB) -> Message:
     require_admin(member)
+    await lock_workspace(db, member.workspace_id)
     target = await db.get(Member, (member.workspace_id, user_id))
     if not target:
         raise HTTPException(404, "Member not found")
@@ -130,7 +136,7 @@ async def remove_member(user_id: str, member: Membership, db: DB) -> Message:
 @router.post("/workspaces/{workspace_id}/demo", response_model=Message)
 async def populate(member: Membership, db: DB) -> Message:
     require_admin(member)
-    ws = await db.get(Workspace, member.workspace_id)
+    ws = await lock_workspace(db, member.workspace_id)
     assert ws is not None
     exists = await db.scalar(select(Dataset.id).where(Dataset.workspace_id == ws.id).limit(1))
     if exists:
@@ -142,7 +148,7 @@ async def populate(member: Membership, db: DB) -> Message:
 @router.post("/workspaces/{workspace_id}/reset-demo", response_model=Message)
 async def reset_demo(member: Membership, db: DB) -> Message:
     require_admin(member)
-    ws = await db.get(Workspace, member.workspace_id)
+    ws = await lock_workspace(db, member.workspace_id)
     assert ws is not None
     if not ws.demo:
         raise HTTPException(400, "Only isolated demo workspaces can be reset")

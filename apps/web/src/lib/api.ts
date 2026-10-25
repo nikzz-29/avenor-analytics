@@ -4,9 +4,12 @@ export type User = Schema['ProfileOut'];
 export type Workspace = Schema['WorkspaceOut'];
 export type AnalyticsQuery = Schema['QueryIn'];
 export type Point = Schema['Point'];
-export type Widget = Omit<Schema['Widget'], 'query' | 'type' | 'width' | 'height' | 'notes'> & {
+export type Widget = Omit<
+  Schema['Widget-Input'],
+  'query' | 'type' | 'width' | 'height' | 'notes'
+> & {
   query: AnalyticsQuery;
-  type: NonNullable<Schema['Widget']['type']>;
+  type: NonNullable<Schema['Widget-Input']['type']>;
   width: 1 | 2;
   height: 1 | 2;
   notes: string;
@@ -78,13 +81,18 @@ export async function download(
   anchor.click();
   URL.revokeObjectURL(url);
 }
-export const money = (value: string | number | null | undefined, locale = 'en-US') =>
+export const money = (
+  value: string | number | null | undefined,
+  locale = 'en-US',
+  fractionDigits = 0,
+) =>
   value == null
     ? 'Not available'
     : new Intl.NumberFormat(locale, {
         style: 'currency',
         currency: 'USD',
-        maximumFractionDigits: 0,
+        minimumFractionDigits: fractionDigits,
+        maximumFractionDigits: fractionDigits,
       }).format(Number(value));
 export const number = (value: string | number | null | undefined, locale = 'en-US') =>
   value == null
