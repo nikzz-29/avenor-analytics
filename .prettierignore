@@ -1,0 +1,6 @@
+apps/web/src/lib/api-schema.d.ts
+apps/web/node_modules
+apps/web/.next
+packages/api-contracts/openapi.json
+apps/web/test-results
+apps/web/playwright-report

@@ -1,0 +1,4 @@
+order_id,order_date,customer_id,product_name,quantity,unit_price,category,channel,status,discount,refund
+SAMPLE-001,2025-10-01,CUSTOMER-01,Arc Desk Lamp,2,89.00,Home & living,Online store,paid,10.00,0.00
+SAMPLE-002,2025-10-03,CUSTOMER-02,Everyday Tote,1,54.00,Accessories,Retail,paid,0.00,0.00
+SAMPLE-003,2025-10-05,CUSTOMER-01,Linen Throw,1,68.00,Home & living,Online store,refunded,0.00,20.00
